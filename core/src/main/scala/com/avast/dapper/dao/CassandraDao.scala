@@ -26,14 +26,16 @@ class CassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](override v
   }
 
   override def save(instance: Entity): Future[Unit] = {
-    logger.debug(s"Saving to $tableName with primary key ${instance.primaryKey}")
+    logger.debug(s"Saving to $tableName with primary key ${entityMapper.getPrimaryKey(instance)}")
     execute(entityMapper.save(tableName, instance)).map(toUnit)
   }
 
   override def delete(instance: Entity): Future[Unit] = {
-    logger.debug(s"Deleting from $tableName with primary key ${instance.primaryKey}")
+    val primaryKey = entityMapper.getPrimaryKey(instance)
 
-    val convertedKey = entityMapper.convertPrimaryKey(instance.primaryKey)
+    logger.debug(s"Deleting from $tableName with primary key $primaryKey")
+
+    val convertedKey = entityMapper.convertPrimaryKey(primaryKey)
     val q = new SimpleStatement(s"delete from $tableName where ${entityMapper.primaryKeyPattern}", convertedKey)
 
     execute(q).map(toUnit)

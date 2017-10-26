@@ -1,5 +1,7 @@
 package com.avast.dapper.dao
 
+import java.util.UUID
+
 import com.datastax.driver.core.{ResultSet, Statement}
 
 import scala.annotation.implicitNotFound
@@ -8,6 +10,8 @@ import scala.annotation.implicitNotFound
 trait EntityMapper[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]] {
 
   def primaryKeyPattern: String
+
+  def getPrimaryKey(instance: Entity): PrimaryKey
 
   def convertPrimaryKey(k: PrimaryKey): Seq[Object]
 

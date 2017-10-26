@@ -1,10 +1,11 @@
 package com.avast.dapper.dao
 
+import java.util.UUID
+
 import com.avast.dapper.CassandraTestBase
 import com.datastax.driver.core._
-import com.datastax.driver.mapping.annotations.{PartitionKey, Table}
+import com.datastax.driver.core.utils.UUIDs
 
-import scala.reflect.ClassTag
 import scala.util.Random
 
 class CassandraDaoTest extends CassandraTestBase {
@@ -12,50 +13,29 @@ class CassandraDaoTest extends CassandraTestBase {
 
   override protected def dbCommands: Seq[String] = Seq.empty
 
-  implicit val intCodec: ScalaCodec[Int] = new ScalaCodec[Int] {
-
-    type JavaT = Integer
-
-    override protected val ct: ClassTag[Int] = implicitly[ClassTag[Int]]
-
-    override def toObject(v: Int): Integer = v
-
-    override def fromObject(o: JavaT): Int = o
-
-    override def javaTypeCodec: TypeCodec[Integer] = TypeCodec.cint()
-  }
-
-  implicit val stringCodec = new ScalaCodec[String] {
-    type JavaT = String
-
-    override protected val ct = implicitly[ClassTag[String]]
-
-    override def toObject(v: String) = v
-
-    override def fromObject(o: String) = o
-
-    override def javaTypeCodec = TypeCodec.varchar()
-  }
-
   test("manual mapper") {
     @Table(name = "test")
-    case class DbRow(@PartitionKey id: Int, value: String) extends CassandraEntity[Int] {
-      override def primaryKey: Int = id
-    }
+    case class DbRow(@PartitionKey(order = 0) id: Int,
+                     @PartitionKey(order = 0) @Column(cqlType = CqlType.TimeUUID) created: UUID,
+                     value: String)
+        extends CassandraEntity[(Int, UUID)]
 
-    implicit val mapper: EntityMapper[Int, DbRow] = new EntityMapper[Int, DbRow] {
+    implicit val mapper: EntityMapper[(Int, UUID), DbRow] = new EntityMapper[(Int, UUID), DbRow] {
 
-      val c1 = implicitly[ScalaCodec[Int]]
-      val c2 = implicitly[ScalaCodec[String]]
+      val c1 = ScalaCodecs.intCodec
+      val c2 = ScalaCodecs.timeUuid
+      val c3 = ScalaCodecs.stringCodec
 
-      CodecRegistry.DEFAULT_INSTANCE.register( // type codecs for Java types
-                                              c1.javaTypeCodec,
-                                              c2.javaTypeCodec)
+      CodecRegistry.DEFAULT_INSTANCE.register(c1.javaTypeCodec, c2.javaTypeCodec, c3.javaTypeCodec)
 
-      override def primaryKeyPattern: String = "id = ?"
+      override def primaryKeyPattern: String = "id = ? and created = ?"
 
-      override def convertPrimaryKey(k: Int): Seq[Object] = {
-        Seq(c1.toObject(k))
+      def getPrimaryKey(instance: DbRow): (Int, UUID) = (instance.id, instance.created)
+
+      override def convertPrimaryKey(k: (Int, UUID)): Seq[Object] = {
+        val (k1, k2) = k
+
+        Seq(c1.toObject(k1), c2.toObject(k2))
       }
 
       override def extract(r: ResultSet): DbRow = {
@@ -63,25 +43,30 @@ class CassandraDaoTest extends CassandraTestBase {
 
         DbRow(
           c1.fromObject(row.get("id", c1.javaTypeCodec)),
-          c2.fromObject(row.get("value", c2.javaTypeCodec)),
+          c2.fromObject(row.get("created", c2.javaTypeCodec)),
+          c3.fromObject(row.get("value", c3.javaTypeCodec)),
         )
       }
 
       override def save(tableName: String, e: DbRow): Statement = {
-        new SimpleStatement(s"insert into $tableName (id, value) values (?, ?)", c1.toObject(e.id), c2.toObject(e.value))
+        new SimpleStatement(s"insert into $tableName (id, created, value) values (?, ?, ?)",
+                            c1.toObject(e.id),
+                            c2.toObject(e.created),
+                            c3.toObject(e.value))
       }
     }
 
-    val dao = new CassandraDao[Int, DbRow]("test", cassandra.underlying)
+    val dao = new CassandraDao[(Int, UUID), DbRow]("test", cassandra.underlying)
 
     val randomRow = DbRow(
       id = Random.nextInt(1000),
+      created = UUIDs.timeBased(),
       value = randomString(10)
     )
 
     dao.save(randomRow).futureValue
 
-    assertResult(Some(randomRow))(dao.get(randomRow.id).futureValue)
+    assertResult(Some(randomRow))(dao.get((randomRow.id, randomRow.created)).futureValue)
   }
 
 }
