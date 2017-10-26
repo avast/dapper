@@ -15,11 +15,8 @@
  */
 package com.avast.dapper.dao;
 
-import com.datastax.driver.core.DataType;
-import com.datastax.driver.core.TypeCodec;
 import com.datastax.driver.mapping.MappingConfiguration;
 import com.datastax.driver.mapping.NamingStrategy;
-import com.datastax.driver.mapping.annotations.Defaults;
 import com.datastax.driver.mapping.annotations.Transient;
 
 import java.lang.annotation.ElementType;
@@ -59,5 +56,5 @@ public @interface Column {
      */
     boolean caseSensitive() default false;
 
-    CqlType cqlType();
+    Class<? extends CqlType> cqlType();
 }

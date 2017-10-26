@@ -16,15 +16,15 @@ class CassandraDaoTest extends CassandraTestBase {
   test("manual mapper") {
     @Table(name = "test")
     case class DbRow(@PartitionKey(order = 0) id: Int,
-                     @PartitionKey(order = 0) @Column(cqlType = CqlType.TimeUUID) created: UUID,
+                     @PartitionKey(order = 0) @Column(cqlType = classOf[CqlType.Int]) created: UUID,
                      value: String)
         extends CassandraEntity[(Int, UUID)]
 
     implicit val mapper: EntityMapper[(Int, UUID), DbRow] = new EntityMapper[(Int, UUID), DbRow] {
 
-      val c1 = ScalaCodecs.intCodec
-      val c2 = ScalaCodecs.timeUuid
-      val c3 = ScalaCodecs.stringCodec
+      val c1 = implicitly[ScalaCodec[Int, Integer, CqlType.Int]]
+      val c2 = implicitly[ScalaCodec[UUID, UUID, CqlType.TimeUUID]]
+      val c3 = implicitly[ScalaCodec[String, String, CqlType.VarChar]]
 
       CodecRegistry.DEFAULT_INSTANCE.register(c1.javaTypeCodec, c2.javaTypeCodec, c3.javaTypeCodec)
 
