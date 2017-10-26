@@ -12,6 +12,15 @@ abstract class ScalaCodec[T, JavaT, DbType <: CqlType](val javaTypeCodec: TypeCo
 }
 
 object ScalaCodec {
+
+  def identity[A, CT](typeCodec: TypeCodec[A]): ScalaCodec[A, A, CT] = {
+    new ScalaCodec[A, A, CT](typeCodec) {
+      override def toObject(v: A): A = v
+
+      override def fromObject(o: A): A = o
+    }
+  }
+
   implicit val intCodec = new ScalaCodec[Int, Integer, CqlType.Int](TypeCodec.cint()) {
 
     override def toObject(v: Int): Integer = v
@@ -19,25 +28,7 @@ object ScalaCodec {
     override def fromObject(o: Integer): Int = o
   }
 
-  implicit val stringCodec = new ScalaCodec[String, String, CqlType.VarChar](TypeCodec.varchar()) {
-
-    override def toObject(v: String) = v
-
-    override def fromObject(o: String) = o
-  }
-
-  implicit val uuid = new ScalaCodec[UUID, UUID, CqlType.UUID](TypeCodec.uuid()) {
-
-    override def toObject(v: UUID) = v
-
-    override def fromObject(o: UUID) = o
-  }
-
-  implicit val timeUuid = new ScalaCodec[UUID, UUID, CqlType.TimeUUID](TypeCodec.timeUUID()) {
-
-    override def toObject(v: UUID) = v
-
-    override def fromObject(o: UUID) = o
-
-  }
+  implicit val stringCodec = ScalaCodec.identity[String, CqlType.VarChar](TypeCodec.varchar())
+  implicit val uuid = ScalaCodec.identity[UUID, CqlType.UUID](TypeCodec.uuid())
+  implicit val timeUuid = ScalaCodec.identity[UUID, CqlType.TimeUUID](TypeCodec.timeUUID())
 }
