@@ -7,3 +7,5 @@ resolvers += Resolver.url(
   Resolver.ivyStylePatterns)
 
 addSbtPlugin("me.lessis" % "bintray-sbt" % "0.3.0")
+
+addSbtPlugin("io.spray" % "sbt-boilerplate" % "0.6.1")
