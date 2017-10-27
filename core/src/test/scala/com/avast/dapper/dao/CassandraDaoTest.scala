@@ -16,7 +16,7 @@ class CassandraDaoTest extends CassandraTestBase {
   test("manual mapper") {
     @Table(name = "test")
     case class DbRow(@PartitionKey(order = 0) id: Int,
-                     @PartitionKey(order = 0) @Column(cqlType = classOf[CqlType.Int]) created: UUID,
+                     @PartitionKey(order = 1) @Column(cqlType = classOf[CqlType.TimeUUID]) created: UUID,
                      value: String)
         extends CassandraEntity[(Int, UUID)]
 
