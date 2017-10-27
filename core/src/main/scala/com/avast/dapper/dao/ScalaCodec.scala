@@ -40,6 +40,8 @@ object ScalaCodec {
     override def fromObject(o: B): Option[A] = Option(o).map(codec.fromObject)
   }
 
+  // TODO add all types
+
   implicit val int: ScalaCodec[Int, Integer, CqlType.Int] = ScalaCodec.simple[Int, Integer, CqlType.Int](TypeCodec.cint(), int2Integer, Integer2int)
   implicit val double: ScalaCodec[Double, lang.Double, CqlType.Double] = ScalaCodec.simple[Double, lang.Double, CqlType.Double](TypeCodec.cdouble(), double2Double, Double2double)
   implicit val float: ScalaCodec[Float, lang.Float, CqlType.Float] = ScalaCodec.simple[Float, lang.Float, CqlType.Float](TypeCodec.cfloat(), float2Float, Float2float)
