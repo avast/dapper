@@ -34,6 +34,12 @@ object ScalaCodec {
 
   def identity[A, CT <: CqlType](typeCodec: TypeCodec[A]): ScalaCodec[A, A, CT] = simple[A, A, CT](typeCodec, Predef.identity, Predef.identity)
 
+  implicit def option[A, B,CT <: CqlType](implicit codec: ScalaCodec[A, B, CT]): ScalaCodec[Option[A], B, CT] = new ScalaCodec[Option[A], B, CT](codec.javaTypeCodec) {
+    override def toObject(v: Option[A]): B = v.map(codec.toObject).getOrElse(null.asInstanceOf[B])
+
+    override def fromObject(o: B): Option[A] = Option(o).map(codec.fromObject)
+  }
+
   implicit val int: ScalaCodec[Int, Integer, CqlType.Int] = ScalaCodec.simple[Int, Integer, CqlType.Int](TypeCodec.cint(), int2Integer, Integer2int)
   implicit val double: ScalaCodec[Double, lang.Double, CqlType.Double] = ScalaCodec.simple[Double, lang.Double, CqlType.Double](TypeCodec.cdouble(), double2Double, Double2double)
   implicit val float: ScalaCodec[Float, lang.Float, CqlType.Float] = ScalaCodec.simple[Float, lang.Float, CqlType.Float](TypeCodec.cfloat(), float2Float, Float2float)

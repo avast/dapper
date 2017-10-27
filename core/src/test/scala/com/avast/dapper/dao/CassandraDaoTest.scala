@@ -23,8 +23,9 @@ class CassandraDaoTest extends CassandraTestBase {
                      @Column(cqlType = classOf[CqlType.Map[String, String]]) params: Map[String, String],
                      @Column(cqlType = classOf[CqlType.List[String]]) names: Seq[String],
                      @Column(cqlType = classOf[CqlType.Set[String]]) ints: Set[Int],
-                     value: String,
-                     location: Location)
+                     @Column(cqlType = classOf[CqlType.Ascii]) value: String,
+                     location: Location,
+                     valueOpt: Option[String])
         extends CassandraEntity[(Int, UUID)]
 
     implicit val mapper: EntityMapper[(Int, UUID), DbRow] = new EntityMapper[(Int, UUID), DbRow] {
@@ -39,6 +40,8 @@ class CassandraDaoTest extends CassandraTestBase {
       val c7_1 = implicitly[ScalaCodec[Float, java.lang.Float, CqlType.Float]]
       val c7_2 = implicitly[ScalaCodec[Float, java.lang.Float, CqlType.Float]]
       val c7_3 = implicitly[ScalaCodec[Int, Integer, CqlType.Int]]
+
+      val c8 = implicitly[ScalaCodec[Option[String], String, CqlType.VarChar]]
 
       CodecRegistry.DEFAULT_INSTANCE.register(c1.javaTypeCodec,
                                               c2.javaTypeCodec,
@@ -76,6 +79,7 @@ class CassandraDaoTest extends CassandraTestBase {
           c5.fromObject(row.get("ints", c5.javaTypeCodec)),
           c6.fromObject(row.get("value", c6.javaTypeCodec)),
           location,
+          c8.fromObject(row.get("valueOpt", c8.javaTypeCodec)),
         )
       }
 
@@ -104,7 +108,8 @@ class CassandraDaoTest extends CassandraTestBase {
       params = Map(randomString(5) -> randomString(5), randomString(5) -> randomString(5)),
       names = Seq(randomString(5), randomString(5)),
       ints = Set(Random.nextInt(1000), Random.nextInt(1000), Random.nextInt(1000)),
-      location = Location(Random.nextFloat(), Random.nextFloat(), Random.nextInt(100))
+      location = Location(Random.nextFloat(), Random.nextFloat(), Random.nextInt(100)),
+      valueOpt = None
     )
 
     dao.save(randomRow).futureValue
