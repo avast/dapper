@@ -2,5 +2,8 @@ CREATE KEYSPACE IF NOT EXISTS dapper WITH replication = { 'class': 'SimpleStrate
 use dapper;
 
 drop table if exists test;
+drop type if exists location;
 
-create TABLE test (id int, created timeuuid, value text, params map<ascii, ascii>, names list<text>, ints set<int>, primary key (id, created));
+create type location (latitude float, longitude float, accuracy int);
+
+create TABLE test (id int, created timeuuid, value text, params map<ascii, ascii>, names list<text>, ints set<int>, location frozen<location>, primary key (id, created));
