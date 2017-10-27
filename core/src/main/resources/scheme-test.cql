@@ -3,4 +3,4 @@ use dapper;
 
 drop table if exists test;
 
-create TABLE test (id int, created timeuuid, value text, primary key (id, created));
+create TABLE test (id int, created timeuuid, value text, params map<ascii, ascii>, names list<text>, ints set<int>, primary key (id, created));

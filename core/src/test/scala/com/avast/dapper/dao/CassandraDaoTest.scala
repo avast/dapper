@@ -17,6 +17,9 @@ class CassandraDaoTest extends CassandraTestBase {
     @Table(name = "test")
     case class DbRow(@PartitionKey(order = 0) id: Int,
                      @PartitionKey(order = 1) @Column(cqlType = classOf[CqlType.TimeUUID]) created: UUID,
+                     @Column(cqlType = classOf[CqlType.Map[String, String]]) params: Map[String, String],
+                     @Column(cqlType = classOf[CqlType.List[String]]) names: Seq[String],
+                     @Column(cqlType = classOf[CqlType.Set[String]]) ints: Set[Int],
                      value: String)
         extends CassandraEntity[(Int, UUID)]
 
@@ -24,9 +27,17 @@ class CassandraDaoTest extends CassandraTestBase {
 
       val c1 = implicitly[ScalaCodec[Int, Integer, CqlType.Int]]
       val c2 = implicitly[ScalaCodec[UUID, UUID, CqlType.TimeUUID]]
-      val c3 = implicitly[ScalaCodec[String, String, CqlType.VarChar]]
+      val c3 = ScalaCodec.map[String, String, CqlType.Ascii, String, String, CqlType.Ascii]
+      val c4 = ScalaCodec.list(ScalaCodec.varchar)
+      val c5 = ScalaCodec.set(ScalaCodec.int)
+      val c6 = implicitly[ScalaCodec[String, String, CqlType.VarChar]]
 
-      CodecRegistry.DEFAULT_INSTANCE.register(c1.javaTypeCodec, c2.javaTypeCodec, c3.javaTypeCodec)
+      CodecRegistry.DEFAULT_INSTANCE.register(c1.javaTypeCodec,
+                                              c2.javaTypeCodec,
+                                              c3.javaTypeCodec,
+                                              c4.javaTypeCodec,
+                                              c5.javaTypeCodec,
+                                              c6.javaTypeCodec)
 
       override def primaryKeyPattern: String = "id = ? and created = ?"
 
@@ -44,15 +55,23 @@ class CassandraDaoTest extends CassandraTestBase {
         DbRow(
           c1.fromObject(row.get("id", c1.javaTypeCodec)),
           c2.fromObject(row.get("created", c2.javaTypeCodec)),
-          c3.fromObject(row.get("value", c3.javaTypeCodec)),
+          c3.fromObject(row.get("params", c3.javaTypeCodec)),
+          c4.fromObject(row.get("names", c4.javaTypeCodec)),
+          c5.fromObject(row.get("ints", c5.javaTypeCodec)),
+          c6.fromObject(row.get("value", c6.javaTypeCodec)),
         )
       }
 
       override def save(tableName: String, e: DbRow): Statement = {
-        new SimpleStatement(s"insert into $tableName (id, created, value) values (?, ?, ?)",
-                            c1.toObject(e.id),
-                            c2.toObject(e.created),
-                            c3.toObject(e.value))
+        new SimpleStatement(
+          s"insert into $tableName (id, created, params, names, ints, value) values (?, ?, ?, ?, ?, ?)",
+          c1.toObject(e.id),
+          c2.toObject(e.created),
+          c3.toObject(e.params),
+          c4.toObject(e.names),
+          c5.toObject(e.ints),
+          c6.toObject(e.value)
+        )
       }
     }
 
@@ -61,7 +80,10 @@ class CassandraDaoTest extends CassandraTestBase {
     val randomRow = DbRow(
       id = Random.nextInt(1000),
       created = UUIDs.timeBased(),
-      value = randomString(10)
+      value = randomString(10),
+      params = Map(randomString(5) -> randomString(5), randomString(5) -> randomString(5)),
+      names = Seq(randomString(5), randomString(5)),
+      ints = Set(Random.nextInt(1000), Random.nextInt(1000), Random.nextInt(1000))
     )
 
     dao.save(randomRow).futureValue

@@ -1,10 +1,12 @@
 package com.avast.dapper.dao
 
+import com.datastax.driver.core.TypeCodec
+
 sealed trait CqlType {}
 
 object CqlType {
 
-  // all following types arecase class with no param intentionally - it't used like a better enum both into Scala and Java, case object cannot be used
+  // all following types are case class with no param intentionally - it't used like a better enum both into Scala and Java, case object cannot be used
 
   case class VarChar() extends CqlType
 
@@ -27,5 +29,12 @@ object CqlType {
   case class Date() extends CqlType
 
   case class Timestamp() extends CqlType
+
+  // TODO elemType: CqlType
+  case class List[A](elemCodec: TypeCodec[A]) extends CqlType
+
+  case class Set[A](elemCodec: TypeCodec[A]) extends CqlType
+
+  case class Map[K, V](keyCodec: TypeCodec[K], valueCodec: TypeCodec[V]) extends CqlType
 
 }

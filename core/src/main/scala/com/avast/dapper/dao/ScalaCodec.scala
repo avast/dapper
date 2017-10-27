@@ -1,13 +1,19 @@
 package com.avast.dapper.dao
 
-import java.lang
 import java.nio.ByteBuffer
 import java.time.Instant
 import java.util.{Date, UUID}
+import java.{lang, util}
 
 import com.datastax.driver.core.TypeCodec
 import com.datastax.driver.{core => Datastax}
 
+import scala.annotation.implicitNotFound
+import scala.collection.JavaConverters._
+import scala.language.implicitConversions
+
+@implicitNotFound(
+  "Could not find an instance of ScalaCodec for CQL type ${DbType}, Scala type ${T}, Java type ${JavaT}, try to import or define one")
 abstract class ScalaCodec[T, JavaT, DbType <: CqlType](val javaTypeCodec: TypeCodec[JavaT]) {
 
   def toObject(v: T): JavaT
@@ -32,7 +38,8 @@ object ScalaCodec {
   implicit val double: ScalaCodec[Double, lang.Double, CqlType.Double] = ScalaCodec.simple[Double, lang.Double, CqlType.Double](TypeCodec.cdouble(), double2Double, Double2double)
   implicit val float: ScalaCodec[Float, lang.Float, CqlType.Float] = ScalaCodec.simple[Float, lang.Float, CqlType.Float](TypeCodec.cfloat(), float2Float, Float2float)
   implicit val boolean: ScalaCodec[Boolean, lang.Boolean, CqlType.Boolean] = ScalaCodec.simple[Boolean, lang.Boolean, CqlType.Boolean](TypeCodec.cboolean(), boolean2Boolean, Boolean2boolean)
-  implicit val string: ScalaCodec[String, String, CqlType.VarChar] = ScalaCodec.identity[String, CqlType.VarChar](TypeCodec.varchar())
+  implicit val varchar: ScalaCodec[String, String, CqlType.VarChar] = ScalaCodec.identity[String, CqlType.VarChar](TypeCodec.varchar())
+  implicit val ascii: ScalaCodec[String, String, CqlType.Ascii] = ScalaCodec.identity[String, CqlType.Ascii](TypeCodec.ascii())
   implicit val uuid: ScalaCodec[UUID, UUID, CqlType.UUID] = ScalaCodec.identity[UUID, CqlType.UUID](TypeCodec.uuid())
   implicit val timeUuid: ScalaCodec[UUID, UUID, CqlType.TimeUUID] = ScalaCodec.identity[UUID, CqlType.TimeUUID](TypeCodec.timeUUID())
 
@@ -56,4 +63,21 @@ object ScalaCodec {
       b
     }
   }
+
+  def list[A, B, CT <: CqlType](elemCodec: ScalaCodec[A, B, CT]): ScalaCodec[Seq[A], java.util.List[B], CqlType.List[A]] = ScalaCodec.simple[Seq[A], java.util.List[B], CqlType.List[A]](TypeCodec.list[B](elemCodec.javaTypeCodec), _.map(elemCodec.toObject).asJava, _.asScala.map(elemCodec.fromObject))
+
+  def set[A, B, CT <: CqlType](elemCodec: ScalaCodec[A, B, CT]): ScalaCodec[Set[A], java.util.Set[B], CqlType.Set[A]] = ScalaCodec.simple[Set[A], java.util.Set[B], CqlType.Set[A]](TypeCodec.set[B](elemCodec.javaTypeCodec), _.map(elemCodec.toObject).asJava, _.asScala.map(elemCodec.fromObject).toSet)
+
+  def map[K, KJ, KCT <: CqlType, V, VJ, VCT <: CqlType](implicit keyCodec: ScalaCodec[K, KJ, KCT], valueCodec: ScalaCodec[V, VJ, VCT]): ScalaCodec[Map[K, V], util.Map[KJ, VJ], CqlType.Map[KCT, VCT]] =
+    new ScalaCodec[Map[K, V], java.util.Map[KJ, VJ], CqlType.Map[KCT, VCT]](TypeCodec.map[KJ, VJ](keyCodec.javaTypeCodec, valueCodec.javaTypeCodec)) {
+      override def toObject(m: Map[K, V]): util.Map[KJ, VJ] = m.map {
+        case (key, value) =>
+          keyCodec.toObject(key) -> valueCodec.toObject(value)
+      }.asJava
+
+      override def fromObject(m: util.Map[KJ, VJ]): Map[K, V] = m.asScala.map {
+        case (key, value) =>
+          keyCodec.fromObject(key) -> valueCodec.fromObject(value)
+      }.toMap
+    }
 }
