@@ -13,6 +13,8 @@ class CassandraDaoTest extends CassandraTestBase {
 
   override protected def dbCommands: Seq[String] = Seq.empty
 
+  def createTupleType(types: DataType*): TupleType = cassandra.underlying.getCluster.getMetadata.newTupleType(types: _*)
+
   test("manual mapper") {
 
     case class Location(latitude: Float, longitude: Float, accuracy: Int)
@@ -20,12 +22,13 @@ class CassandraDaoTest extends CassandraTestBase {
     @Table(name = "test")
     case class DbRow(@PartitionKey(order = 0) id: Int,
                      @PartitionKey(order = 1) @Column(cqlType = classOf[CqlType.TimeUUID]) created: UUID,
-                     @Column(cqlType = classOf[CqlType.Map[String, String]]) params: Map[String, String],
-                     @Column(cqlType = classOf[CqlType.List[String]]) names: Seq[String],
-                     @Column(cqlType = classOf[CqlType.Set[String]]) ints: Set[Int],
-                     @Column(cqlType = classOf[CqlType.Ascii]) value: String,
+                     @Column(cqlType = classOf[CqlType.Map[CqlType.Ascii, CqlType.Ascii]]) params: Map[String, String],
+                     @Column(cqlType = classOf[CqlType.List[CqlType.VarChar]]) names: Seq[String],
+                     @Column(cqlType = classOf[CqlType.Set[CqlType.Int]]) ints: Set[Int],
+                     value: String,
                      location: Location,
-                     valueOpt: Option[String])
+                     valueOpt: Option[String],
+                     tuple: (Int, String))
         extends CassandraEntity[(Int, UUID)]
 
     implicit val mapper: EntityMapper[(Int, UUID), DbRow] = new EntityMapper[(Int, UUID), DbRow] {
@@ -36,19 +39,26 @@ class CassandraDaoTest extends CassandraTestBase {
       val c4 = ScalaCodec.list(ScalaCodec.varchar)
       val c5 = ScalaCodec.set(ScalaCodec.int)
       val c6 = implicitly[ScalaCodec[String, String, CqlType.VarChar]]
-
       val c7_1 = implicitly[ScalaCodec[Float, java.lang.Float, CqlType.Float]]
       val c7_2 = implicitly[ScalaCodec[Float, java.lang.Float, CqlType.Float]]
       val c7_3 = implicitly[ScalaCodec[Int, Integer, CqlType.Int]]
-
       val c8 = implicitly[ScalaCodec[Option[String], String, CqlType.VarChar]]
+      val c9 =
+        ScalaCodec.tuple2[Int, Integer, CqlType.Int, String, String, CqlType.VarChar](createTupleType(DataType.cint(), DataType.text()))
 
-      CodecRegistry.DEFAULT_INSTANCE.register(c1.javaTypeCodec,
-                                              c2.javaTypeCodec,
-                                              c3.javaTypeCodec,
-                                              c4.javaTypeCodec,
-                                              c5.javaTypeCodec,
-                                              c6.javaTypeCodec)
+      CodecRegistry.DEFAULT_INSTANCE.register(
+        c1.javaTypeCodec,
+        c2.javaTypeCodec,
+        c3.javaTypeCodec,
+        c4.javaTypeCodec,
+        c5.javaTypeCodec,
+        c6.javaTypeCodec,
+        c7_1.javaTypeCodec,
+        c7_2.javaTypeCodec,
+        c7_3.javaTypeCodec,
+        c8.javaTypeCodec,
+        c9.javaTypeCodec
+      )
 
       override def primaryKeyPattern: String = "id = ? and created = ?"
 
@@ -80,21 +90,24 @@ class CassandraDaoTest extends CassandraTestBase {
           c6.fromObject(row.get("value", c6.javaTypeCodec)),
           location,
           c8.fromObject(row.get("valueOpt", c8.javaTypeCodec)),
+          c9.fromObject(row.get("tuple", c9.javaTypeCodec)),
         )
       }
 
       override def save(tableName: String, e: DbRow): Statement = {
         new SimpleStatement(
-          s"insert into $tableName (id, created, params, names, ints, value, location) values (?, ?, ?, ?, ?, ?, {latitude: ?, longitude: ?, accuracy: ?})",
+          s"insert into $tableName (id, created, params, names, ints, value, valueOpt, location, tuple) values (?, ?, ?, ?, ?, ?, ?, {latitude: ?, longitude: ?, accuracy: ?}, ?)",
           c1.toObject(e.id),
           c2.toObject(e.created),
           c3.toObject(e.params),
           c4.toObject(e.names),
           c5.toObject(e.ints),
           c6.toObject(e.value),
+          c8.toObject(e.valueOpt),
           c7_1.toObject(e.location.latitude),
           c7_2.toObject(e.location.longitude),
-          c7_3.toObject(e.location.accuracy)
+          c7_3.toObject(e.location.accuracy),
+          c9.toObject(e.tuple)
         )
       }
     }
@@ -109,7 +122,8 @@ class CassandraDaoTest extends CassandraTestBase {
       names = Seq(randomString(5), randomString(5)),
       ints = Set(Random.nextInt(1000), Random.nextInt(1000), Random.nextInt(1000)),
       location = Location(Random.nextFloat(), Random.nextFloat(), Random.nextInt(100)),
-      valueOpt = None
+      valueOpt = None,
+      tuple = (Random.nextInt(1000), randomString(10))
     )
 
     dao.save(randomRow).futureValue

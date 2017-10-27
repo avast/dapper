@@ -6,4 +6,4 @@ drop type if exists location;
 
 create type location (latitude float, longitude float, accuracy int);
 
-create TABLE test (id int, created timeuuid, value text, params map<ascii, ascii>, names list<text>, ints set<int>, location frozen<location>, valueOpt text, primary key (id, created));
+create TABLE test (id int, created timeuuid, value text, params map<ascii, ascii>, names list<text>, ints set<int>, location frozen<location>, valueOpt text, tuple tuple<int, text>, primary key (id, created));

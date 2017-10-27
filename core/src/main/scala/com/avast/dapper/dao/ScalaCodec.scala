@@ -5,7 +5,7 @@ import java.time.Instant
 import java.util.{Date, UUID}
 import java.{lang, util}
 
-import com.datastax.driver.core.TypeCodec
+import com.datastax.driver.core.{TupleType, TupleValue, TypeCodec}
 import com.datastax.driver.{core => Datastax}
 
 import scala.annotation.implicitNotFound
@@ -34,7 +34,7 @@ object ScalaCodec {
 
   def identity[A, CT <: CqlType](typeCodec: TypeCodec[A]): ScalaCodec[A, A, CT] = simple[A, A, CT](typeCodec, Predef.identity, Predef.identity)
 
-  implicit def option[A, B,CT <: CqlType](implicit codec: ScalaCodec[A, B, CT]): ScalaCodec[Option[A], B, CT] = new ScalaCodec[Option[A], B, CT](codec.javaTypeCodec) {
+  implicit def option[A, B, CT <: CqlType](implicit codec: ScalaCodec[A, B, CT]): ScalaCodec[Option[A], B, CT] = new ScalaCodec[Option[A], B, CT](codec.javaTypeCodec) {
     override def toObject(v: Option[A]): B = v.map(codec.toObject).getOrElse(null.asInstanceOf[B])
 
     override def fromObject(o: B): Option[A] = Option(o).map(codec.fromObject)
@@ -70,9 +70,9 @@ object ScalaCodec {
     }
   }
 
-  def list[A, B, CT <: CqlType](elemCodec: ScalaCodec[A, B, CT]): ScalaCodec[Seq[A], java.util.List[B], CqlType.List[A]] = ScalaCodec.simple[Seq[A], java.util.List[B], CqlType.List[A]](TypeCodec.list[B](elemCodec.javaTypeCodec), _.map(elemCodec.toObject).asJava, _.asScala.map(elemCodec.fromObject))
+  def list[A, B, CT <: CqlType](elemCodec: ScalaCodec[A, B, CT]): ScalaCodec[Seq[A], java.util.List[B], CqlType.List[CT]] = ScalaCodec.simple[Seq[A], java.util.List[B], CqlType.List[CT]](TypeCodec.list[B](elemCodec.javaTypeCodec), _.map(elemCodec.toObject).asJava, _.asScala.map(elemCodec.fromObject))
 
-  def set[A, B, CT <: CqlType](elemCodec: ScalaCodec[A, B, CT]): ScalaCodec[Set[A], java.util.Set[B], CqlType.Set[A]] = ScalaCodec.simple[Set[A], java.util.Set[B], CqlType.Set[A]](TypeCodec.set[B](elemCodec.javaTypeCodec), _.map(elemCodec.toObject).asJava, _.asScala.map(elemCodec.fromObject).toSet)
+  def set[A, B, CT <: CqlType](elemCodec: ScalaCodec[A, B, CT]): ScalaCodec[Set[A], java.util.Set[B], CqlType.Set[CT]] = ScalaCodec.simple[Set[A], java.util.Set[B], CqlType.Set[CT]](TypeCodec.set[B](elemCodec.javaTypeCodec), _.map(elemCodec.toObject).asJava, _.asScala.map(elemCodec.fromObject).toSet)
 
   def map[K, KJ, KCT <: CqlType, V, VJ, VCT <: CqlType](implicit keyCodec: ScalaCodec[K, KJ, KCT], valueCodec: ScalaCodec[V, VJ, VCT]): ScalaCodec[Map[K, V], util.Map[KJ, VJ], CqlType.Map[KCT, VCT]] =
     new ScalaCodec[Map[K, V], java.util.Map[KJ, VJ], CqlType.Map[KCT, VCT]](TypeCodec.map[KJ, VJ](keyCodec.javaTypeCodec, valueCodec.javaTypeCodec)) {
@@ -85,5 +85,23 @@ object ScalaCodec {
         case (key, value) =>
           keyCodec.fromObject(key) -> valueCodec.fromObject(value)
       }.toMap
+    }
+
+  def tuple2[A1, A1J, A1CT <: CqlType, A2, A2J, A2CT <: CqlType](tupleType: TupleType)(implicit a1Codec: ScalaCodec[A1, A1J, A1CT], a2Codec: ScalaCodec[A2, A2J, A2CT]): ScalaCodec[(A1, A2), TupleValue, CqlType.Tuple2[A1CT, A2CT]] =
+    new ScalaCodec[(A1, A2), TupleValue, CqlType.Tuple2[A1CT, A2CT]](TypeCodec.tuple(tupleType)) {
+      override def toObject(v: (A1, A2)): TupleValue = {
+        val (a1, a2) = v
+
+        tupleType.newValue()
+          .set(0, a1Codec.toObject(a1), a1Codec.javaTypeCodec)
+          .set(1, a2Codec.toObject(a2), a2Codec.javaTypeCodec)
+      }
+
+      override def fromObject(o: TupleValue): (A1, A2) = {
+        val a1 = a1Codec.fromObject(o.get(0, a1Codec.javaTypeCodec))
+        val a2 = a2Codec.fromObject(o.get(1, a2Codec.javaTypeCodec))
+
+        (a1, a2)
+      }
     }
 }

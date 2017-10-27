@@ -30,11 +30,12 @@ object CqlType {
 
   case class Timestamp() extends CqlType
 
-  // TODO elemType: CqlType
-  case class List[A](elemCodec: TypeCodec[A]) extends CqlType
+  case class List[A <: CqlType]() extends CqlType
 
-  case class Set[A](elemCodec: TypeCodec[A]) extends CqlType
+  case class Set[A <: CqlType]() extends CqlType
 
-  case class Map[K, V](keyCodec: TypeCodec[K], valueCodec: TypeCodec[V]) extends CqlType
+  case class Map[K <: CqlType, V <: CqlType]() extends CqlType
+
+  case class Tuple2[A1 <: CqlType, A2 <: CqlType]() extends CqlType
 
 }
