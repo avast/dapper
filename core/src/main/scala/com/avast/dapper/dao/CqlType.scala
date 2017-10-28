@@ -38,4 +38,7 @@ object CqlType {
 
   case class Tuple2[A1 <: CqlType, A2 <: CqlType]() extends CqlType
 
+  case class UDT() extends CqlType
+
+
 }

@@ -2,7 +2,7 @@ package com.avast.dapper
 
 import java.nio.file.{Files, Paths}
 
-import com.avast.utils2.datastax.{Cassandra, ClusterBuilder}
+import com.avast.utils2.datastax.{Cassandra => UtilsCassandra, ClusterBuilder}
 import com.datastax.driver.core.{Session, SimpleStatement}
 import org.apache.commons.lang3.StringUtils
 
@@ -10,7 +10,7 @@ import scala.concurrent.ExecutionContext
 
 trait CassandraTestBase extends TestBase {
 
-  protected val cassandra: Cassandra = {
+  protected val cassandra: UtilsCassandra = {
     val executionContext = scala.concurrent.ExecutionContext.global
 
     // init the DB
@@ -18,7 +18,7 @@ trait CassandraTestBase extends TestBase {
     prepareDatabase(session)
     session.close()
 
-    Cassandra.fromConfig(config.getConfig("cassandra"))(executionContext)
+    UtilsCassandra.fromConfig(config.getConfig("cassandra"))(executionContext)
   }
 
   protected def dbCommands: Seq[String]

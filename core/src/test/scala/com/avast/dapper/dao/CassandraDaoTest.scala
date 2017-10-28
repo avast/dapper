@@ -135,4 +135,25 @@ class CassandraDaoTest extends CassandraTestBase {
     assertResult(Some(randomRow))(dao.get((randomRow.id, randomRow.created)).futureValue)
   }
 
+  test("auto mapper") {
+    case class Location(latitude: Float, longitude: Float, accuracy: Int)
+
+    @Table(name = "test")
+    case class DbRow(@PartitionKey(order = 0) id: Int,
+                     @PartitionKey(order = 1)  created: UUID,
+//                     @Column(cqlType = classOf[CqlType.Map[CqlType.Ascii, CqlType.Ascii]]) params: Map[String, String],
+                     @Column(cqlType = classOf[CqlType.List[CqlType.VarChar]]) names: Seq[String],
+//                     @Column(cqlType = classOf[CqlType.Set[CqlType.Int]]) ints: Set[Int],
+                     value: String,
+//                     @Column(cqlType = classOf[CqlType.UDT]) location: Location,
+                     valueOpt: Option[String],
+//                     @Column(cqlType = classOf[CqlType.Map[CqlType.Int, CqlType.VarChar]]) tuple: (Int, String)
+     )
+        extends CassandraEntity[(Int, UUID)]
+
+    import com.avast.dapper._
+
+    val dao = new Cassandra(cassandra.underlying).deriveDaoFor[(Int, UUID), DbRow]
+  }
+
 }
