@@ -3,9 +3,9 @@ package com.avast.dapper
 import java.nio.ByteBuffer
 
 import com.avast.dapper.Macros.AnnotationsMap
-import com.avast.dapper.dao.{CassandraDao, CassandraEntity, Column, CqlType, PartitionKey, ScalaCodec, Table}
+import com.avast.dapper.dao.{CassandraDao, CassandraEntity, Column, CqlType, PartitionKey, Table}
+import com.datastax.driver.{core => Datastax}
 
-import scala.reflect.ClassTag
 import scala.reflect.macros._
 
 class Macros(val c: whitebox.Context) {
@@ -27,8 +27,8 @@ class Macros(val c: whitebox.Context) {
 
     final val List = typeOf[CqlType.List[_]]
     final val Set = typeOf[CqlType.Set[_]]
-//    final def Map[K <: CqlType, V <: CqlType]: c.universe.TypeSymbol = typeOf[CqlType.Map[K, V]].typeSymbol.asType
-//    final def Tuple2[A1 <: CqlType, A2 <: CqlType]: c.universe.TypeSymbol = typeOf[CqlType.Tuple2[A1, A2]].typeSymbol.asType
+    //    final def Map[K <: CqlType, V <: CqlType]: c.universe.TypeSymbol = typeOf[CqlType.Map[K, V]].typeSymbol.asType
+    //    final def Tuple2[A1 <: CqlType, A2 <: CqlType]: c.universe.TypeSymbol = typeOf[CqlType.Tuple2[A1, A2]].typeSymbol.asType
 
     final val UDT = typeOf[CqlType.UDT].erasure
   }
@@ -54,42 +54,16 @@ class Macros(val c: whitebox.Context) {
     val primaryKeyType = weakTypeOf[PrimaryKey]
     val entityType = weakTypeOf[Entity]
 
-    if (!entityType.typeSymbol.isClass) {
-      c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} is not a class")
-    }
+    val entitySymbol = toCaseClassSymbol(entityType)
 
-    val entitySymbol = entityType.typeSymbol.asClass
-
-    if (!entitySymbol.isCaseClass) {
-      c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} is not a case class")
-    }
-
+    // TODO extract table name
     entitySymbol.annotations.collectFirst {
       case a if a.toString == classOf[Table].getName =>
     }
 
-    val entityCtor = entityType.decls
-      .collectFirst {
-        case m: MethodSymbol if m.isPrimaryConstructor => m
-      }
-      .getOrElse(c.abort(c.enclosingPosition, s"Unable to extract ctor from type ${entityType.typeSymbol}"))
+    val tableName: String ="test"
 
-    if (entityCtor.paramLists.length != 1) {
-      c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} must have exactly 1 parameter list")
-    }
-
-    val entityFields: Map[Symbol, (CodecType, AnnotationsMap)] = {
-
-      val fields = entityCtor.paramLists.head
-      val withAnnotations = fields zip fields.map(getAnnotations)
-
-      withAnnotations.map {
-        case (field, annots) =>
-          val codecType = getCodecType(field, annots)
-
-          field -> (codecType, annots)
-      }
-    }.toMap
+    val entityFields: Map[c.universe.Symbol, (CodecType, AnnotationsMap)] = extractFields(entityType)
 
     val primaryKeyFields = entityFields
       .collect {
@@ -110,20 +84,19 @@ class Macros(val c: whitebox.Context) {
       // format: ON
     }
 
-    val codecs: Iterable[Tree] = entityFields.zipWithIndex.map {
-      case ((field, (codecType, annots)), index) =>
-        codec(index, field, codecType)
+    val codecs: Map[String, Tree] = entityFields.flatMap {
+      case (field, (codecType, _)) =>
+        codec(field, codecType)
     }
 
-    val m =
+    val mapper =
       q"""
-      new EntityMapper[$primaryKeyType, $entityType] {
 
-        private val cassandraInstance = $getVariable
+      implicit val mapper = new EntityMapper[$primaryKeyType, $entityType] {
 
-        ..$codecs
+        ..${codecs.values}
 
-        cassandraInstance.codecRegistry.register(..${entityFields.map(f => q"${TermName("codec_" + f._1.name)}.javaTypeCodec")})
+        cassandraInstance.codecRegistry.register(..${codecs.keys.map(n => q"${TermName("codec_" + n)}.javaTypeCodec")})
 
         override def primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
 
@@ -137,7 +110,21 @@ class Macros(val c: whitebox.Context) {
       }
       """
 
-    c.abort(c.enclosingPosition, m.toString())
+    val dao =
+      q"""
+         {
+            val cassandraInstance = $getVariable
+
+            $mapper
+
+            new CassandraDao[$primaryKeyType, $entityType]($tableName, cassandraInstance.session)
+         }
+       """
+
+    println(dao)
+
+//    c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
+    c.abort(c.enclosingPosition, dao.toString())
   }
 
   private def convertPrimaryKey(primaryKeyFields: Seq[c.universe.Symbol]): Tree = {
@@ -145,19 +132,25 @@ class Macros(val c: whitebox.Context) {
 
     val mappings = withIndex.map {
       case (field, index) =>
-        q"${TermName("codec_" + field.name)}.toObject(${TermName("k._" + (index + 1))})"
+        q"${TermName("codec_" + field.name)}.toObject(${TermName("_" + (index + 1))})" // for some unknown reason "k._1" cannot be used :-(
     }
 
-    q""" Seq(..$mappings) """
+    q""" { import k._; Seq(..$mappings) } """
   }
 
-  private def codec(index: Int, field: c.universe.Symbol, codecType: CodecType): c.universe.Tree = {
-    val c = codecType match {
-      case CodecType.Simple(t, ct) => q"implicitly[ScalaCodec[$t, ${javaClassForCqlType(ct)}, $ct]]"
-      case CodecType.List(inT) => q"ScalaCodec.list(${scalaCodecForCqlType(inT)})"
+  private def codec(field: c.universe.Symbol, codecType: CodecType, namePrefix: String = ""): Map[String, Tree] = {
+    def wrapWithVal(name: String, codec: Tree): Map[String, Tree] = {
+      Map(name -> q""" private val ${TermName("codec_" + name)} = $codec """)
     }
 
-    q""" private val ${TermName("codec_" + field.name)} = $c """
+    codecType match {
+      case CodecType.Simple(t, ct) => wrapWithVal(namePrefix + field.name, q"implicitly[ScalaCodec[$t, ${javaClassForCqlType(ct)}, $ct]]")
+      case CodecType.List(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.list(${scalaCodecForCqlType(inT)})")
+      case CodecType.UDT(codecs) =>
+        codecs.flatMap {
+          case (udtField, udtCodec) => codec(udtField, udtCodec, field.name.toString + "_")
+        }
+    }
   }
 
   private def getCodecType(field: Symbol, annots: AnnotationsMap): CodecType = {
@@ -170,12 +163,14 @@ class Macros(val c: whitebox.Context) {
 
     val cqlType = extractCqlType.getOrElse(defaultCqlType(field))
 
-    cqlType match {
-      case ct if ct.typeSymbol == CqlTypes.List.typeSymbol =>
-        CodecType.List(inT = ct.typeArgs.head.erasure)
+    cqlType.erasure match {
+      case _ if cqlType.typeSymbol == CqlTypes.List.typeSymbol =>
+        CodecType.List(inT = cqlType.typeArgs.head.erasure)
 
-      case ct =>
-        CodecType.Simple(t = field.typeSignature.resultType, ct = ct)
+      case CqlTypes.UDT => createUDTCodec(field)
+
+      case _ =>
+        CodecType.Simple(t = field.typeSignature.resultType, ct = cqlType)
     }
 
   }
@@ -190,6 +185,20 @@ class Macros(val c: whitebox.Context) {
     }
 
     annotsTypes.zip(annotsParams).toMap
+  }
+
+  private def createUDTCodec(field: Symbol): CodecType.UDT = {
+    val udtType = field.typeSignature
+
+    toCaseClassSymbol(udtType) // don't need result, just check it's a case class
+
+    val udtFields = extractFields(udtType)
+
+    val codecs = udtFields.map {
+      case (f, (codecType, _)) => f -> codecType
+    }
+
+    CodecType.UDT(codecs = codecs)
   }
 
   private def defaultCqlType(field: c.universe.Symbol): Type = {
@@ -232,7 +241,7 @@ class Macros(val c: whitebox.Context) {
       case CqlTypes.Blob => typeOf[ByteBuffer]
       case CqlTypes.Double => typeOf[java.lang.Double]
       case CqlTypes.Float => typeOf[java.lang.Float]
-      case CqlTypes.Date => typeOf[com.datastax.driver.core.LocalDate]
+      case CqlTypes.Date => typeOf[Datastax.LocalDate]
       case CqlTypes.Timestamp => typeOf[java.util.Date]
       // TODO other types
 
@@ -275,8 +284,39 @@ class Macros(val c: whitebox.Context) {
     q" $variable "
   }
 
-  private def extractType[A: ClassTag]: c.universe.Type = {
-    stringToType(implicitly[ClassTag[A]].runtimeClass.getName)
+  private def extractFields(entityType: c.universe.Type): Map[c.universe.Symbol, (CodecType, AnnotationsMap)] = {
+    val entityCtor = entityType.decls
+      .collectFirst {
+        case m: MethodSymbol if m.isPrimaryConstructor => m
+      }
+      .getOrElse(c.abort(c.enclosingPosition, s"Unable to extract ctor from type ${entityType.typeSymbol}"))
+
+    if (entityCtor.paramLists.length != 1) {
+      c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} must have exactly 1 parameter list")
+    }
+
+    val fields = entityCtor.paramLists.head
+    val withAnnotations = fields zip fields.map(getAnnotations)
+
+    withAnnotations.map {
+      case (field, annots) =>
+        val codecType = getCodecType(field, annots)
+
+        field -> (codecType, annots)
+    }.toMap
+  }
+
+  private def toCaseClassSymbol(entityType: c.universe.Type): ClassSymbol = {
+    if (!entityType.typeSymbol.isClass) {
+      c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} is not a class")
+    }
+
+    val entitySymbol = entityType.typeSymbol.asClass
+
+    if (!entitySymbol.isCaseClass) {
+      c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} is not a case class")
+    }
+    entitySymbol
   }
 
   private def stringToType(s: String): c.universe.Type = {
@@ -295,6 +335,8 @@ class Macros(val c: whitebox.Context) {
     //    case class Set(t: TypeSymbol, ct: TypeSymbol) extends CodecType
     //
     //    case class Map(kT: TypeSymbol, kCt: TypeSymbol, vT: TypeSymbol, vCt: TypeSymbol) extends CodecType
+
+    case class UDT(codecs: Map[Symbol, CodecType]) extends CodecType
 
   }
 

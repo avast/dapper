@@ -145,7 +145,7 @@ class CassandraDaoTest extends CassandraTestBase {
                      @Column(cqlType = classOf[CqlType.List[CqlType.VarChar]]) names: Seq[String],
 //                     @Column(cqlType = classOf[CqlType.Set[CqlType.Int]]) ints: Set[Int],
                      value: String,
-//                     @Column(cqlType = classOf[CqlType.UDT]) location: Location,
+                     @Column(cqlType = classOf[CqlType.UDT]) location: Location,
                      valueOpt: Option[String],
 //                     @Column(cqlType = classOf[CqlType.Map[CqlType.Int, CqlType.VarChar]]) tuple: (Int, String)
      )

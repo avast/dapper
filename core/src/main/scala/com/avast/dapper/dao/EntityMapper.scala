@@ -1,12 +1,11 @@
 package com.avast.dapper.dao
 
-import java.util.UUID
-
 import com.datastax.driver.core.{ResultSet, Statement}
 
 import scala.annotation.implicitNotFound
 
-@implicitNotFound("Could not find an instance of EntityMapper for ${Entity}, try to import or define one")
+@implicitNotFound(
+  "Could not find an instance of EntityMapper for entity ${Entity} and primary key ${PrimaryKey}, try to import or define one")
 trait EntityMapper[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]] {
 
   def primaryKeyPattern: String
