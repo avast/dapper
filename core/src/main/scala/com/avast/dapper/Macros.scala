@@ -26,9 +26,11 @@ class Macros(val c: whitebox.Context) {
     final val Timestamp = typeOf[CqlType.Timestamp].erasure
 
     final def List(t: Type): Type = getType(tq"CqlType.List[${defaultCqlType(t)}]")
+
     final def Set(t: Type): Type = getType(tq"CqlType.Set[${defaultCqlType(t)}]")
 
-    //    final def Map[K <: CqlType, V <: CqlType]: c.universe.TypeSymbol = typeOf[CqlType.Map[K, V]].typeSymbol.asType
+    final def Map(k: Type, v: Type): Type = getType(tq"CqlType.Map[${defaultCqlType(k)},${defaultCqlType(v)}]")
+
     //    final def Tuple2[A1 <: CqlType, A2 <: CqlType]: c.universe.TypeSymbol = typeOf[CqlType.Tuple2[A1, A2]].typeSymbol.asType
 
     final val UDT = typeOf[CqlType.UDT].erasure
@@ -50,6 +52,7 @@ class Macros(val c: whitebox.Context) {
     final val Set = typeOf[scala.collection.immutable.Set[_]].erasure
     final val Seq = typeOf[scala.collection.immutable.Seq[_]].erasure
     final val SeqMutable = typeOf[scala.collection.Seq[_]].erasure
+    final val Map = typeOf[scala.Predef.Map[_, _]].erasure
   }
 
   // format: OFF
@@ -132,7 +135,7 @@ class Macros(val c: whitebox.Context) {
     println(dao)
 
     c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
-//    c.abort(c.enclosingPosition, dao.toString())
+    //    c.abort(c.enclosingPosition, dao.toString())
   }
 
   private def convertPrimaryKey(primaryKeyFields: Seq[Symbol]): Tree = {
@@ -227,6 +230,7 @@ class Macros(val c: whitebox.Context) {
       case CodecType.Simple(t, ct) => wrapWithVal(namePrefix + field.name, q"implicitly[ScalaCodec[$t, ${javaClassForCqlType(ct)}, $ct]]")
       case CodecType.List(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.list(${scalaCodecForCqlType(inT)})")
       case CodecType.Set(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.set(${scalaCodecForCqlType(inT)})")
+      case CodecType.Map(k, v) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.map(${scalaCodecForCqlType(k)}, ${scalaCodecForCqlType(v)})")
       case CodecType.UDT(codecs) =>
         codecs.flatMap {
           case (udtField, udtCodec) => codec(udtField, udtCodec, namePrefix + field.name + "_")
@@ -251,9 +255,12 @@ class Macros(val c: whitebox.Context) {
       }
     }
 
+    val typeArgs = cqlType.typeArgs
+
     cqlType.erasure match {
-      case _ if cqlType.typeSymbol == typeOf[CqlType.List[_]].typeSymbol => CodecType.List(inT = cqlType.typeArgs.head)
-      case _ if cqlType.typeSymbol == typeOf[CqlType.Set[_]].typeSymbol => CodecType.Set(inT = cqlType.typeArgs.head)
+      case _ if cqlType.typeSymbol == typeOf[CqlType.List[_]].typeSymbol => CodecType.List(inT = typeArgs.head)
+      case _ if cqlType.typeSymbol == typeOf[CqlType.Set[_]].typeSymbol => CodecType.Set(inT = typeArgs.head)
+      case _ if cqlType.typeSymbol == typeOf[CqlType.Map[_, _]].typeSymbol => CodecType.Map(k = typeArgs.head, v = typeArgs(1))
 
       case CqlTypes.UDT => createUDTCodec(field)
 
@@ -290,6 +297,7 @@ class Macros(val c: whitebox.Context) {
   }
 
   private def defaultCqlType(ts: Type): Type = {
+    val typeArgs = ts.typeArgs
 
     ts.erasure match {
       case ScalaTypes.String => CqlTypes.VarChar
@@ -302,9 +310,10 @@ class Macros(val c: whitebox.Context) {
       case ScalaTypes.LocalDate => CqlTypes.Date
       case ScalaTypes.Instant => CqlTypes.Timestamp
 
-      case ScalaTypes.Set => CqlTypes.Set(ts.typeArgs.head)
-      case ScalaTypes.Seq => CqlTypes.List(ts.typeArgs.head)
-      case ScalaTypes.SeqMutable => CqlTypes.List(ts.typeArgs.head)
+      case ScalaTypes.Set => CqlTypes.Set(typeArgs.head)
+      case ScalaTypes.Seq => CqlTypes.List(typeArgs.head)
+      case ScalaTypes.SeqMutable => CqlTypes.List(typeArgs.head)
+      case ScalaTypes.Map => CqlTypes.Map(typeArgs.head, typeArgs(1))
       // TODO other types
       case a =>
         c.abort(
@@ -315,6 +324,8 @@ class Macros(val c: whitebox.Context) {
   }
 
   private def javaClassForCqlType(cqlType: Type): Type = {
+    val typeArgs = cqlType.typeArgs
+
     cqlType.erasure match {
       case CqlTypes.VarChar => typeOf[java.lang.String]
       case CqlTypes.Ascii => typeOf[java.lang.String]
@@ -329,8 +340,12 @@ class Macros(val c: whitebox.Context) {
       case CqlTypes.Timestamp => typeOf[java.util.Date]
       // TODO other types
 
-      case _ if cqlType.typeSymbol == typeOf[CqlType.List[_]].typeSymbol => stringToType(s"java.util.List[${cqlType.typeArgs.head}]")
-      case _ if cqlType.typeSymbol == typeOf[CqlType.Set[_]].typeSymbol => stringToType(s"java.util.Set[${cqlType.typeArgs.head}]")
+      case _ if cqlType.typeSymbol == typeOf[CqlType.List[_]].typeSymbol => stringToType(s"java.util.List[${typeArgs.head}]")
+      case _ if cqlType.typeSymbol == typeOf[CqlType.Set[_]].typeSymbol => stringToType(s"java.util.Set[${typeArgs.head}]")
+      case _ if cqlType.typeSymbol == typeOf[CqlType.Map[_, _]].typeSymbol =>
+        val k = typeArgs.head
+        val v = typeArgs(1)
+        getType(tq"java.util.Map[$k, $v]")
     }
   }
 
@@ -418,10 +433,9 @@ class Macros(val c: whitebox.Context) {
 
     case class Set(inT: Type) extends CodecType
 
-    //
-    //    case class Map(kT: TypeSymbol, kCt: TypeSymbol, vT: TypeSymbol, vCt: TypeSymbol) extends CodecType
+    case class Map(k: Type, v: Type) extends CodecType
 
-    case class UDT(codecs: Map[Symbol, CodecType]) extends CodecType
+    case class UDT(codecs: scala.Predef.Map[Symbol, CodecType]) extends CodecType
 
   }
 

@@ -140,17 +140,16 @@ class CassandraDaoTest extends CassandraTestBase {
     case class Location(latitude: Float, longitude: Float, accuracy: Int)
 
     @Table(name = "test")
-    case class DbRow(@PartitionKey(order = 0) id: Int,
-                     @PartitionKey(order = 1) @Column(cqlType = classOf[CqlType.TimeUUID]) created: UUID,
-                     //                     @Column(cqlType = classOf[CqlType.Map[CqlType.Ascii, CqlType.Ascii]]) params: Map[String, String],
-//                     @Column(cqlType = classOf[CqlType.List[CqlType.VarChar]])
-                     names: Seq[String],
-//                     @Column(cqlType = classOf[CqlType.Set[CqlType.Int]])
-                     ints: Set[Int],
-                     value: String,
-                     @Column(cqlType = classOf[CqlType.UDT]) location: Location,
-                     valueOpt: Option[String],
-                     //                     @Column(cqlType = classOf[CqlType.Map[CqlType.Int, CqlType.VarChar]]) tuple: (Int, String)
+    case class DbRow(
+        @PartitionKey(order = 0) id: Int,
+        @PartitionKey(order = 1) @Column(cqlType = classOf[CqlType.TimeUUID]) created: UUID,
+        @Column(cqlType = classOf[CqlType.Map[CqlType.Ascii, CqlType.Ascii]]) params: Map[String, String], // needs expl. types - not a default string codec
+        names: Seq[String],
+        ints: Set[Int],
+        value: String,
+        @Column(cqlType = classOf[CqlType.UDT]) location: Location,
+        valueOpt: Option[String],
+        //                     @Column(cqlType = classOf[CqlType.Map[CqlType.Int, CqlType.VarChar]]) tuple: (Int, String)
     ) extends CassandraEntity[(Int, UUID)]
 
     import com.avast.dapper._
@@ -161,7 +160,7 @@ class CassandraDaoTest extends CassandraTestBase {
       id = Random.nextInt(1000),
       created = UUIDs.timeBased(),
       value = randomString(10),
-      //      params = Map(randomString(5) -> randomString(5), randomString(5) -> randomString(5)),
+      params = Map(randomString(5) -> (randomString(5) + "ěščřžýá"), randomString(5) -> (randomString(5) + "ščřžýáí")),
       names = Seq(randomString(5), randomString(5)),
       ints = Set(Random.nextInt(1000), Random.nextInt(1000), Random.nextInt(1000)),
       location = Location(Random.nextFloat(), Random.nextFloat(), Random.nextInt(100)),
