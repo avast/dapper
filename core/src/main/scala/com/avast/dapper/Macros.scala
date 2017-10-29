@@ -94,22 +94,24 @@ class Macros(val c: whitebox.Context) {
     val mapper =
       q"""
 
-      implicit val mapper = new EntityMapper[$primaryKeyType, $entityType] {
+      private implicit val mapper: EntityMapper[$primaryKeyType, $entityType] = new EntityMapper[$primaryKeyType, $entityType] {
 
         ..${codecs.values}
 
         cassandraInstance.codecRegistry.register(..${codecs.keys.map(n => q"${TermName("codec_" + n)}.javaTypeCodec")})
 
-        override def primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
+        def primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
 
-        override def getPrimaryKey(instance: $entityType): $primaryKeyType = (..${primaryKeyFields.map(s =>
-        q"instance.${TermName(s.name.toString)}")})
+        def getPrimaryKey(instance: $entityType): $primaryKeyType = (..${primaryKeyFields.map(s => q"instance.${TermName(s.name.toString)}")})
 
-        override def convertPrimaryKey(k: $primaryKeyType): Seq[Object] = ${convertPrimaryKey(primaryKeyFields)}
+        def convertPrimaryKey(k: $primaryKeyType): Seq[Object] = ${convertPrimaryKey(primaryKeyFields)}
 
-        override def extract(r: ResultSet): $entityType = ???
+        def extract(r: ResultSet): $entityType = {
+          val row = r.one()
+          ${createExtractMethod(entitySymbol, entityFields)}
+        }
 
-        override def save(tableName: String, e: $entityType): Statement = ${createSaveMethod(tableName, entityFields)}
+        def save(tableName: String, e: $entityType): Statement = ${createSaveMethod(tableName, entityFields)}
       }
       """
 
@@ -126,8 +128,8 @@ class Macros(val c: whitebox.Context) {
 
     println(dao)
 
-    //    c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
-    c.abort(c.enclosingPosition, dao.toString())
+    c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
+    //    c.abort(c.enclosingPosition, dao.toString())
   }
 
   private def convertPrimaryKey(primaryKeyFields: Seq[Symbol]): Tree = {
@@ -176,6 +178,40 @@ class Macros(val c: whitebox.Context) {
           $query,
           ..$bindings
        )
+     """
+  }
+
+  private def createExtractMethod(entitySymbol: TypeSymbol,
+                                  entityFields: Map[Symbol, (CodecType, AnnotationsMap)],
+                                  codecNamePrefix: String = "",
+                                  rowVar: TermName = TermName("row")): Tree = {
+
+    // TODO support customized name
+    val fields: Iterable[Tree] = entityFields.map {
+      case (field, (CodecType.UDT(udtCodecs), _)) =>
+        val udtTypeSymbol = field.typeSignature.typeSymbol.asType
+        val udtFields = udtCodecs.map { case (udtField, codec) => udtField -> (codec, getAnnotations(udtField)) }
+
+        val fieldName = field.name.toString
+        val udtRowVar = TermName("row_" + fieldName)
+        q"""
+            ${TermName(fieldName)} = {
+              val $udtRowVar = $rowVar.getUDTValue($fieldName)
+              ${createExtractMethod(udtTypeSymbol, udtFields, codecNamePrefix = fieldName + "_", rowVar = udtRowVar)}
+            }
+          """
+
+      case (field, (_, _)) =>
+        val fieldName = field.name.toString
+        val codecName = TermName("codec_" + codecNamePrefix + fieldName)
+
+        q"${TermName(fieldName)} = $codecName.fromObject($rowVar.get($fieldName, $codecName.javaTypeCodec))"
+    }
+
+    q"""
+          new $entitySymbol(
+            ..$fields
+          )
      """
   }
 
@@ -272,7 +308,7 @@ class Macros(val c: whitebox.Context) {
   }
 
   private def javaClassForCqlType(cqlType: Type): Type = {
-    cqlType match {
+    cqlType.erasure match {
       case CqlTypes.VarChar => typeOf[java.lang.String]
       case CqlTypes.Ascii => typeOf[java.lang.String]
       case CqlTypes.Int => typeOf[java.lang.Integer]
@@ -286,14 +322,14 @@ class Macros(val c: whitebox.Context) {
       case CqlTypes.Timestamp => typeOf[java.util.Date]
       // TODO other types
 
-      case ct if ct.typeSymbol == CqlTypes.List.typeSymbol =>
-        val typeArg = ct.typeArgs.head
+      case _ if cqlType.typeSymbol == CqlTypes.List.typeSymbol =>
+        val typeArg = cqlType.typeArgs.head
         stringToType(s"java.util.List[$typeArg]")
     }
   }
 
   private def scalaCodecForCqlType(cqlType: Type): Tree = {
-    cqlType match {
+    cqlType.erasure match {
       case CqlTypes.VarChar => q"ScalaCodec.varchar"
       case CqlTypes.Ascii => q"ScalaCodec.ascii"
       case CqlTypes.Int => q"ScalaCodec.int"

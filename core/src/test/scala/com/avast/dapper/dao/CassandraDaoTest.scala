@@ -141,7 +141,7 @@ class CassandraDaoTest extends CassandraTestBase {
 
     @Table(name = "test")
     case class DbRow(@PartitionKey(order = 0) id: Int,
-                     @PartitionKey(order = 1) created: UUID,
+                     @PartitionKey(order = 1) @Column(cqlType = classOf[CqlType.TimeUUID]) created: UUID,
                      //                     @Column(cqlType = classOf[CqlType.Map[CqlType.Ascii, CqlType.Ascii]]) params: Map[String, String],
                      @Column(cqlType = classOf[CqlType.List[CqlType.VarChar]]) names: Seq[String],
                      //                     @Column(cqlType = classOf[CqlType.Set[CqlType.Int]]) ints: Set[Int],
@@ -168,6 +168,8 @@ class CassandraDaoTest extends CassandraTestBase {
     )
 
     dao.save(randomRow).futureValue
+
+    assertResult(Some(randomRow))(dao.get((randomRow.id, randomRow.created)).futureValue)
   }
 
 }
