@@ -25,8 +25,9 @@ class Macros(val c: whitebox.Context) {
     final val Date = typeOf[CqlType.Date].erasure
     final val Timestamp = typeOf[CqlType.Timestamp].erasure
 
-    final val List = typeOf[CqlType.List[_]]
-    final val Set = typeOf[CqlType.Set[_]]
+    final def List(t: Type): Type = getType(tq"CqlType.List[${defaultCqlType(t)}]")
+    final def Set(t: Type): Type = getType(tq"CqlType.Set[${defaultCqlType(t)}]")
+
     //    final def Map[K <: CqlType, V <: CqlType]: c.universe.TypeSymbol = typeOf[CqlType.Map[K, V]].typeSymbol.asType
     //    final def Tuple2[A1 <: CqlType, A2 <: CqlType]: c.universe.TypeSymbol = typeOf[CqlType.Tuple2[A1, A2]].typeSymbol.asType
 
@@ -45,6 +46,10 @@ class Macros(val c: whitebox.Context) {
     final val Float = typeOf[scala.Float].erasure
     final val Instant = typeOf[java.time.Instant].erasure
     final val LocalDate = typeOf[java.time.LocalDate].erasure
+
+    final val Set = typeOf[scala.collection.immutable.Set[_]].erasure
+    final val Seq = typeOf[scala.collection.immutable.Seq[_]].erasure
+    final val SeqMutable = typeOf[scala.collection.Seq[_]].erasure
   }
 
   // format: OFF
@@ -127,7 +132,7 @@ class Macros(val c: whitebox.Context) {
     println(dao)
 
     c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
-    //    c.abort(c.enclosingPosition, dao.toString())
+//    c.abort(c.enclosingPosition, dao.toString())
   }
 
   private def convertPrimaryKey(primaryKeyFields: Seq[Symbol]): Tree = {
@@ -213,7 +218,7 @@ class Macros(val c: whitebox.Context) {
      """
   }
 
-  private def codec(field: c.universe.Symbol, codecType: CodecType, namePrefix: String = ""): Map[String, Tree] = {
+  private def codec(field: Symbol, codecType: CodecType, namePrefix: String = ""): Map[String, Tree] = {
     def wrapWithVal(name: String, codec: Tree): Map[String, Tree] = {
       Map(name -> q""" private val ${TermName("codec_" + name)} = $codec """)
     }
@@ -221,6 +226,7 @@ class Macros(val c: whitebox.Context) {
     codecType match {
       case CodecType.Simple(t, ct) => wrapWithVal(namePrefix + field.name, q"implicitly[ScalaCodec[$t, ${javaClassForCqlType(ct)}, $ct]]")
       case CodecType.List(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.list(${scalaCodecForCqlType(inT)})")
+      case CodecType.Set(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.set(${scalaCodecForCqlType(inT)})")
       case CodecType.UDT(codecs) =>
         codecs.flatMap {
           case (udtField, udtCodec) => codec(udtField, udtCodec, namePrefix + field.name + "_")
@@ -236,11 +242,18 @@ class Macros(val c: whitebox.Context) {
         .map(stringToType)
     }
 
-    val cqlType = extractCqlType.getOrElse(defaultCqlType(field))
+    val cqlType = extractCqlType.getOrElse {
+      defaultCqlType {
+        val n = field.typeSignature
+        if (n.erasure == ScalaTypes.Option) {
+          field.typeSignature.typeArgs.head
+        } else n
+      }
+    }
 
     cqlType.erasure match {
-      case _ if cqlType.typeSymbol == CqlTypes.List.typeSymbol =>
-        CodecType.List(inT = cqlType.typeArgs.head.erasure)
+      case _ if cqlType.typeSymbol == typeOf[CqlType.List[_]].typeSymbol => CodecType.List(inT = cqlType.typeArgs.head)
+      case _ if cqlType.typeSymbol == typeOf[CqlType.Set[_]].typeSymbol => CodecType.Set(inT = cqlType.typeArgs.head)
 
       case CqlTypes.UDT => createUDTCodec(field)
 
@@ -276,17 +289,9 @@ class Macros(val c: whitebox.Context) {
     CodecType.UDT(codecs = codecs)
   }
 
-  private def defaultCqlType(field: c.universe.Symbol): Type = {
-    import c.universe._
+  private def defaultCqlType(ts: Type): Type = {
 
-    val ts: Type = {
-      val n = field.typeSignature.erasure
-      if (n == ScalaTypes.Option) {
-        field.typeSignature.typeArgs.head.erasure
-      } else n
-    }
-
-    ts match {
+    ts.erasure match {
       case ScalaTypes.String => CqlTypes.VarChar
       case ScalaTypes.Int => CqlTypes.Int
       case ScalaTypes.UUID => CqlTypes.UUID
@@ -296,11 +301,15 @@ class Macros(val c: whitebox.Context) {
       case ScalaTypes.Float => CqlTypes.Float
       case ScalaTypes.LocalDate => CqlTypes.Date
       case ScalaTypes.Instant => CqlTypes.Timestamp
+
+      case ScalaTypes.Set => CqlTypes.Set(ts.typeArgs.head)
+      case ScalaTypes.Seq => CqlTypes.List(ts.typeArgs.head)
+      case ScalaTypes.SeqMutable => CqlTypes.List(ts.typeArgs.head)
       // TODO other types
       case a =>
         c.abort(
           c.enclosingPosition,
-          s"Could not derive default CqlType for Scala type $a, please provide explicit CqlType by @Column annotation for field '${field.name}'"
+          s"Could not derive default CqlType for Scala type $a, please provide explicit CqlType by @Column annotation for field with type $ts"
         )
     }
   }
@@ -320,9 +329,8 @@ class Macros(val c: whitebox.Context) {
       case CqlTypes.Timestamp => typeOf[java.util.Date]
       // TODO other types
 
-      case _ if cqlType.typeSymbol == CqlTypes.List.typeSymbol =>
-        val typeArg = cqlType.typeArgs.head
-        stringToType(s"java.util.List[$typeArg]")
+      case _ if cqlType.typeSymbol == typeOf[CqlType.List[_]].typeSymbol => stringToType(s"java.util.List[${cqlType.typeArgs.head}]")
+      case _ if cqlType.typeSymbol == typeOf[CqlType.Set[_]].typeSymbol => stringToType(s"java.util.Set[${cqlType.typeArgs.head}]")
     }
   }
 
@@ -359,7 +367,7 @@ class Macros(val c: whitebox.Context) {
     q" $variable "
   }
 
-  private def extractFields(entityType: c.universe.Type): Map[c.universe.Symbol, (CodecType, AnnotationsMap)] = {
+  private def extractFields(entityType: Type): Map[Symbol, (CodecType, AnnotationsMap)] = {
     val entityCtor = entityType.decls
       .collectFirst {
         case m: MethodSymbol if m.isPrimaryConstructor => m
@@ -381,7 +389,7 @@ class Macros(val c: whitebox.Context) {
     }.toMap
   }
 
-  private def toCaseClassSymbol(entityType: c.universe.Type): ClassSymbol = {
+  private def toCaseClassSymbol(entityType: Type): ClassSymbol = {
     if (!entityType.typeSymbol.isClass) {
       c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} is not a class")
     }
@@ -394,9 +402,11 @@ class Macros(val c: whitebox.Context) {
     entitySymbol
   }
 
-  private def stringToType(s: String): c.universe.Type = {
+  private def stringToType(s: String): Type = {
     c.typecheck(c.parse(s"???.asInstanceOf[$s]")).tpe
   }
+
+  def getType(typeTree: Tree): Type = c.typecheck(typeTree, c.TYPEmode).tpe
 
   private sealed trait CodecType
 
@@ -406,8 +416,8 @@ class Macros(val c: whitebox.Context) {
 
     case class List(inT: Type) extends CodecType
 
-    //
-    //    case class Set(t: TypeSymbol, ct: TypeSymbol) extends CodecType
+    case class Set(inT: Type) extends CodecType
+
     //
     //    case class Map(kT: TypeSymbol, kCt: TypeSymbol, vT: TypeSymbol, vCt: TypeSymbol) extends CodecType
 
