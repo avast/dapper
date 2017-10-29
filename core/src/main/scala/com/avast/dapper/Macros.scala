@@ -98,8 +98,6 @@ class Macros(val c: whitebox.Context) {
 
         ..${codecs.values}
 
-        cassandraInstance.codecRegistry.register(..${codecs.keys.map(n => q"${TermName("codec_" + n)}.javaTypeCodec")})
-
         def primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
 
         def getPrimaryKey(instance: $entityType): $primaryKeyType = (..${primaryKeyFields.map(s => q"instance.${TermName(s.name.toString)}")})
