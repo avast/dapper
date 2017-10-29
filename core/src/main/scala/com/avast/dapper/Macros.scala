@@ -69,7 +69,7 @@ class Macros(val c: whitebox.Context) {
 
     val primaryKeyFields = entityFields
       .collect {
-        case (field, (cqlType, annots)) if annots contains classOf[PartitionKey].getName =>
+        case (field, (_, annots)) if annots contains classOf[PartitionKey].getName =>
           annots(classOf[PartitionKey].getName)("order").toInt -> field
       }
       .toSeq
@@ -102,13 +102,14 @@ class Macros(val c: whitebox.Context) {
 
         override def primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
 
-        override def getPrimaryKey(instance: $entityType): $primaryKeyType = (..${primaryKeyFields.map(s => q"instance.$s")})
+        override def getPrimaryKey(instance: $entityType): $primaryKeyType = (..${primaryKeyFields.map(s =>
+        q"instance.${TermName(s.name.toString)}")})
 
         override def convertPrimaryKey(k: $primaryKeyType): Seq[Object] = ${convertPrimaryKey(primaryKeyFields)}
 
         override def extract(r: ResultSet): $entityType = ???
 
-        override def save(tableName: String, e: $entityType): Statement = ???
+        override def save(tableName: String, e: $entityType): Statement = ${createSaveMethod(tableName, entityFields)}
       }
       """
 
@@ -125,11 +126,11 @@ class Macros(val c: whitebox.Context) {
 
     println(dao)
 
-//    c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
+    //    c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
     c.abort(c.enclosingPosition, dao.toString())
   }
 
-  private def convertPrimaryKey(primaryKeyFields: Seq[c.universe.Symbol]): Tree = {
+  private def convertPrimaryKey(primaryKeyFields: Seq[Symbol]): Tree = {
     val withIndex = primaryKeyFields.zipWithIndex
 
     val mappings = withIndex.map {
@@ -138,6 +139,44 @@ class Macros(val c: whitebox.Context) {
     }
 
     q""" { import k._; Seq(..$mappings) } """
+  }
+
+  private def createSaveMethod(tableName: String, entityFields: Map[Symbol, (CodecType, AnnotationsMap)]): Tree = {
+    def fieldToPlaceholder(field: Symbol, codecType: CodecType): String = codecType match {
+      case CodecType.UDT(codecs) => codecs.map { case (udtField, _) => s"${udtField.name}: ?" }.mkString("{", ", ", "}")
+      case _ => "?"
+    }
+
+    def fieldToBindings(field: Symbol, codecType: CodecType): Seq[Tree] = codecType match {
+      case CodecType.UDT(codecs) =>
+        codecs.map {
+          case (udtField, _) =>
+            q"${TermName("codec_" + field.name + "_" + udtField.name)}.toObject(e.${TermName(field.name.toString)}.${TermName(udtField.name.toString)})"
+        }.toSeq
+
+      case _ => Seq(q"${TermName("codec_" + field.name)}.toObject(e.${TermName(field.name.toString)})")
+    }
+
+    val m = entityFields.toSeq.map {
+      case (field, (codecType, _)) =>
+        val placeHolder = fieldToPlaceholder(field, codecType)
+        val bindings = fieldToBindings(field, codecType)
+
+        placeHolder -> bindings
+    }
+
+    val placeHolders = m.map(_._1)
+    val bindings = m.flatMap(_._2)
+
+    // TODO support customized name
+    val query = s"insert into $tableName (${entityFields.map(_._1.name).mkString(", ")}) values (${placeHolders.mkString(", ")})"
+
+    q"""
+       new SimpleStatement(
+          $query,
+          ..$bindings
+       )
+     """
   }
 
   private def codec(field: c.universe.Symbol, codecType: CodecType, namePrefix: String = ""): Map[String, Tree] = {
