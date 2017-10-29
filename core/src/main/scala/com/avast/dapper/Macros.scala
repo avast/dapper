@@ -56,12 +56,14 @@ class Macros(val c: whitebox.Context) {
 
     val entitySymbol = toCaseClassSymbol(entityType)
 
-    // TODO extract table name
-    entitySymbol.annotations.collectFirst {
-      case a if a.toString == classOf[Table].getName =>
-    }
-
-    val tableName: String ="test"
+    val tableName = getAnnotations(entitySymbol)
+      .collectFirst {
+        case (n, params) if n == classOf[Table].getName => params.get("name")
+      }
+      .flatten
+      .getOrElse {
+        c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} must have at least one PartitionKey annotated field")
+      }
 
     val entityFields: Map[c.universe.Symbol, (CodecType, AnnotationsMap)] = extractFields(entityType)
 
@@ -148,7 +150,7 @@ class Macros(val c: whitebox.Context) {
       case CodecType.List(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.list(${scalaCodecForCqlType(inT)})")
       case CodecType.UDT(codecs) =>
         codecs.flatMap {
-          case (udtField, udtCodec) => codec(udtField, udtCodec, field.name.toString + "_")
+          case (udtField, udtCodec) => codec(udtField, udtCodec, namePrefix + field.name + "_")
         }
     }
   }
@@ -175,9 +177,9 @@ class Macros(val c: whitebox.Context) {
 
   }
 
-  private def getAnnotations(field: c.universe.Symbol): AnnotationsMap = {
-    val annotsTypes = field.annotations.map(_.tree.tpe.typeSymbol.fullName)
-    val annotsParams = field.annotations.map {
+  private def getAnnotations(symbol: c.universe.Symbol): AnnotationsMap = {
+    val annotsTypes = symbol.annotations.map(_.tree.tpe.typeSymbol.fullName)
+    val annotsParams = symbol.annotations.map {
       _.tree.children.tail.map {
         case q" $name = $value " =>
           name.toString() -> c.eval(c.Expr(q"$value")).toString
