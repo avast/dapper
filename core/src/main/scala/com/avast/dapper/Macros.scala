@@ -31,7 +31,7 @@ class Macros(val c: whitebox.Context) {
 
     final def Map(k: Type, v: Type): Type = getType(tq"CqlType.Map[${defaultCqlType(k)},${defaultCqlType(v)}]")
 
-    //    final def Tuple2[A1 <: CqlType, A2 <: CqlType]: c.universe.TypeSymbol = typeOf[CqlType.Tuple2[A1, A2]].typeSymbol.asType
+    final def Tuple2(a1: Type, a2: Type): Type = getType(tq"CqlType.Tuple2[${defaultCqlType(a1)},${defaultCqlType(a2)}]")
 
     final val UDT = typeOf[CqlType.UDT].erasure
   }
@@ -53,6 +53,7 @@ class Macros(val c: whitebox.Context) {
     final val Seq = typeOf[scala.collection.immutable.Seq[_]].erasure
     final val SeqMutable = typeOf[scala.collection.Seq[_]].erasure
     final val Map = typeOf[scala.Predef.Map[_, _]].erasure
+    final val Tuple2 = typeOf[(_, _)].erasure
   }
 
   // format: OFF
@@ -104,6 +105,8 @@ class Macros(val c: whitebox.Context) {
 
       private implicit val mapper: EntityMapper[$primaryKeyType, $entityType] = new EntityMapper[$primaryKeyType, $entityType] {
 
+        import com.datastax.driver.{core => Datastax}
+
         ..${codecs.values}
 
         def primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
@@ -135,7 +138,6 @@ class Macros(val c: whitebox.Context) {
     println(dao)
 
     c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
-    //    c.abort(c.enclosingPosition, dao.toString())
   }
 
   private def convertPrimaryKey(primaryKeyFields: Seq[Symbol]): Tree = {
@@ -226,16 +228,16 @@ class Macros(val c: whitebox.Context) {
       Map(name -> q""" private val ${TermName("codec_" + name)} = $codec """)
     }
 
+    // format: OFF
     codecType match {
       case CodecType.Simple(t, ct) => wrapWithVal(namePrefix + field.name, q"implicitly[ScalaCodec[$t, ${javaClassForCqlType(ct)}, $ct]]")
       case CodecType.List(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.list(${scalaCodecForCqlType(inT)})")
       case CodecType.Set(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.set(${scalaCodecForCqlType(inT)})")
       case CodecType.Map(k, v) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.map(${scalaCodecForCqlType(k)}, ${scalaCodecForCqlType(v)})")
-      case CodecType.UDT(codecs) =>
-        codecs.flatMap {
-          case (udtField, udtCodec) => codec(udtField, udtCodec, namePrefix + field.name + "_")
-        }
+      case CodecType.Tuple2(a1, a2) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.tuple2(${createTupleType(a1, a2)})(${scalaCodecForCqlType(a1)}, ${scalaCodecForCqlType(a2)})")
+      case CodecType.UDT(codecs) => codecs.flatMap { case (udtField, udtCodec) => codec(udtField, udtCodec, namePrefix + field.name + "_") }
     }
+    // format: ON
   }
 
   private def getCodecType(field: Symbol, annots: AnnotationsMap): CodecType = {
@@ -261,6 +263,7 @@ class Macros(val c: whitebox.Context) {
       case _ if cqlType.typeSymbol == typeOf[CqlType.List[_]].typeSymbol => CodecType.List(inT = typeArgs.head)
       case _ if cqlType.typeSymbol == typeOf[CqlType.Set[_]].typeSymbol => CodecType.Set(inT = typeArgs.head)
       case _ if cqlType.typeSymbol == typeOf[CqlType.Map[_, _]].typeSymbol => CodecType.Map(k = typeArgs.head, v = typeArgs(1))
+      case _ if cqlType.typeSymbol == typeOf[CqlType.Tuple2[_, _]].typeSymbol => CodecType.Tuple2(a1 = typeArgs.head, a2 = typeArgs(1))
 
       case CqlTypes.UDT => createUDTCodec(field)
 
@@ -314,6 +317,7 @@ class Macros(val c: whitebox.Context) {
       case ScalaTypes.Seq => CqlTypes.List(typeArgs.head)
       case ScalaTypes.SeqMutable => CqlTypes.List(typeArgs.head)
       case ScalaTypes.Map => CqlTypes.Map(typeArgs.head, typeArgs(1))
+      case ScalaTypes.Tuple2 => CqlTypes.Tuple2(typeArgs.head, typeArgs(1))
       // TODO other types
       case a =>
         c.abort(
@@ -340,6 +344,7 @@ class Macros(val c: whitebox.Context) {
       case CqlTypes.Timestamp => typeOf[java.util.Date]
       // TODO other types
 
+      case _ if cqlType.typeSymbol == typeOf[CqlType.Tuple2[_, _]].typeSymbol => typeOf[Datastax.TupleValue]
       case _ if cqlType.typeSymbol == typeOf[CqlType.List[_]].typeSymbol => stringToType(s"java.util.List[${typeArgs.head}]")
       case _ if cqlType.typeSymbol == typeOf[CqlType.Set[_]].typeSymbol => stringToType(s"java.util.Set[${typeArgs.head}]")
       case _ if cqlType.typeSymbol == typeOf[CqlType.Map[_, _]].typeSymbol =>
@@ -366,20 +371,47 @@ class Macros(val c: whitebox.Context) {
     }
   }
 
-  private def getVariable: Tree = {
-    // TODO improve
-    val variable = c.prefix.tree match {
-      case q"dapper.this.`package`.${_}[${_}]($n)" => n
-      case q"dapper.this.`package`.${_}($n)" => n
-      case q"com.avast.dapper.`package`.${_}[${_}]($n)" => n
-      case q"com.avast.dapper.`package`.${_}($n)" => n
+  private def createTupleType(cqlTypes: Type*): Tree = {
+    //cassandra.underlying.getCluster.getMetadata.newTupleType(types: _*)
 
-      case n @ q"new com.avast.dapper.Cassandra(..${_})" => n
+    def toDataType(cqlType: Type): Tree = {
+      val typeArgs = cqlType.typeArgs
 
-      case t => c.abort(c.enclosingPosition, s"Cannot process the conversion - variable name extraction from tree '$t' failed")
+      cqlType.erasure match {
+        case CqlTypes.VarChar => q"Datastax.DataType.varchar()"
+        case CqlTypes.Ascii => q"Datastax.DataType.ascii()"
+        case CqlTypes.Int => q"Datastax.DataType.cint()"
+        case CqlTypes.UUID => q"Datastax.DataType.uuid()"
+        case CqlTypes.TimeUUID => q"Datastax.DataType.timeuuid()"
+        case CqlTypes.Boolean => q"Datastax.DataType.cboolean()"
+        case CqlTypes.Blob => q"Datastax.DataType.blob()"
+        case CqlTypes.Double => q"Datastax.DataType.cdouble()"
+        case CqlTypes.Float => q"Datastax.DataType.cfloat()"
+        case CqlTypes.Date => q"Datastax.DataType.date()"
+        case CqlTypes.Timestamp => q"Datastax.DataType.timestamp()"
+        // TODO other types
+
+        case _ if cqlType.typeSymbol == typeOf[CqlType.List[_]].typeSymbol => q"Datastax.DataType.list(${toDataType(typeArgs.head)})"
+        case _ if cqlType.typeSymbol == typeOf[CqlType.Set[_]].typeSymbol => q"Datastax.DataType.set(${toDataType(typeArgs.head)})"
+        case _ if cqlType.typeSymbol == typeOf[CqlType.Map[_, _]].typeSymbol =>
+          val k = typeArgs.head
+          val v = typeArgs(1)
+          q"Datastax.DataType.map(${toDataType(k)}, ${toDataType(v)})"
+        case _ if cqlType.typeSymbol == typeOf[CqlType.Tuple2[_, _]].typeSymbol =>
+          // TODO support tuples nesting
+          val k = typeArgs.head
+          val v = typeArgs(1)
+          createTupleType(k, v)
+      }
     }
 
-    q" $variable "
+    val dataTypes = cqlTypes.map(toDataType)
+
+    q"cassandraInstance.session.getCluster.getMetadata.newTupleType(..$dataTypes)"
+  }
+
+  private def getVariable: Tree = {
+    q" ${c.prefix.tree} "
   }
 
   private def extractFields(entityType: Type): Map[Symbol, (CodecType, AnnotationsMap)] = {
@@ -434,6 +466,8 @@ class Macros(val c: whitebox.Context) {
     case class Set(inT: Type) extends CodecType
 
     case class Map(k: Type, v: Type) extends CodecType
+
+    case class Tuple2(a1: Type, a2: Type) extends CodecType
 
     case class UDT(codecs: scala.Predef.Map[Symbol, CodecType]) extends CodecType
 

@@ -149,7 +149,8 @@ class CassandraDaoTest extends CassandraTestBase {
         value: String,
         @Column(cqlType = classOf[CqlType.UDT]) location: Location,
         valueOpt: Option[String],
-        //                     @Column(cqlType = classOf[CqlType.Map[CqlType.Int, CqlType.VarChar]]) tuple: (Int, String)
+        //                     @Column(cqlType = classOf[CqlType.Map[CqlType.Int, CqlType.VarChar]])
+        tuple: (Int, String)
     ) extends CassandraEntity[(Int, UUID)]
 
     import com.avast.dapper._
@@ -160,12 +161,12 @@ class CassandraDaoTest extends CassandraTestBase {
       id = Random.nextInt(1000),
       created = UUIDs.timeBased(),
       value = randomString(10),
-      params = Map(randomString(5) -> (randomString(5) + "ěščřžýá"), randomString(5) -> (randomString(5) + "ščřžýáí")),
-      names = Seq(randomString(5), randomString(5)),
+      params = Map(randomString(5) -> randomString(5), randomString(5) -> randomString(5)),
+      names = Seq(randomString(5), randomString(5) + "ěščřžýá"),
       ints = Set(Random.nextInt(1000), Random.nextInt(1000), Random.nextInt(1000)),
       location = Location(Random.nextFloat(), Random.nextFloat(), Random.nextInt(100)),
       valueOpt = None,
-      //      tuple = (Random.nextInt(1000), randomString(10))
+      tuple = (Random.nextInt(1000), randomString(10) + "ěščřžýáí")
     )
 
     dao.save(randomRow).futureValue
