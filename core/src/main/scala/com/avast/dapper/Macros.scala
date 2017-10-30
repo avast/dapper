@@ -137,7 +137,7 @@ class Macros(val c: whitebox.Context) {
 
     println(dao)
 
-        c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
+    c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
 //    c.abort(c.enclosingPosition, dao.toString())
   }
 
@@ -226,10 +226,11 @@ class Macros(val c: whitebox.Context) {
     val placeHolders = m.map(_._1)
     val bindings = m.flatMap(_._2)
 
-    // TODO support customized name
+    // format: OFF
     val query = decorateWithOptions {
-      s"insert into $tableName (${entityFields.map(_._1.name).mkString(", ")}) values (${placeHolders.mkString(", ")})"
+      s"insert into $tableName (${entityFields.map { case (field, (_, annots)) => fieldFinalName(field, annots)}.mkString(", ")}) values (${placeHolders.mkString(", ")})"
     }
+    // format: ON
 
     q"""
        {
@@ -245,12 +246,18 @@ class Macros(val c: whitebox.Context) {
      """
   }
 
+  private def fieldFinalName(field: Symbol, annots: AnnotationsMap): String = {
+    annots
+      .get(classOf[Column].getName)
+      .flatMap(_.get("name"))
+      .getOrElse(field.name.toString)
+  }
+
   private def createExtractMethod(entitySymbol: TypeSymbol,
                                   entityFields: Map[Symbol, (CodecType, AnnotationsMap)],
                                   codecNamePrefix: String = "",
                                   rowVar: TermName = TermName("row")): Tree = {
 
-    // TODO support customized name
     val fields: Iterable[Tree] = entityFields.map {
       case (field, (CodecType.UDT(udtCodecs), _)) =>
         val udtTypeSymbol = field.typeSignature.typeSymbol.asType
@@ -265,11 +272,11 @@ class Macros(val c: whitebox.Context) {
             }
           """
 
-      case (field, (_, _)) =>
+      case (field, (_, annots)) =>
         val fieldName = field.name.toString
         val codecName = TermName("codec_" + codecNamePrefix + fieldName)
 
-        q"${TermName(fieldName)} = $codecName.fromObject($rowVar.get($fieldName, $codecName.javaTypeCodec))"
+        q"${TermName(fieldName)} = $codecName.fromObject($rowVar.get(${fieldFinalName(field, annots)}, $codecName.javaTypeCodec))"
     }
 
     q"""

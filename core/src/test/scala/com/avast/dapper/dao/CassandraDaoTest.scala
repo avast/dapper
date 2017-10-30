@@ -1,11 +1,11 @@
 package com.avast.dapper.dao
 
+import java.time.{Instant, Duration => JavaDuration}
 import java.util.UUID
 
 import com.avast.dapper.CassandraTestBase
 import com.datastax.driver.core._
 import com.datastax.driver.core.utils.UUIDs
-import java.time.{Instant, Duration => JavaDuration}
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.util.Random
@@ -147,7 +147,7 @@ class CassandraDaoTest extends CassandraTestBase {
         @Column(cqlType = classOf[CqlType.Map[CqlType.Ascii, CqlType.Ascii]]) params: Map[String, String], // needs expl. types - not a default string codec
         names: Seq[String],
         ints: Set[Int],
-        value: String,
+        @Column(name = "value", cqlType = classOf[CqlType.VarChar]) stringValue: String,
         @Column(cqlType = classOf[CqlType.UDT]) location: Location,
         valueOpt: Option[String],
         //                     @Column(cqlType = classOf[CqlType.Map[CqlType.Int, CqlType.VarChar]])
@@ -161,7 +161,7 @@ class CassandraDaoTest extends CassandraTestBase {
     val randomRow = DbRow(
       id = Random.nextInt(1000),
       created = UUIDs.timeBased(),
-      value = randomString(10),
+      stringValue = randomString(10),
       params = Map(randomString(5) -> randomString(5), randomString(5) -> randomString(5)),
       names = Seq(randomString(5), randomString(5) + "ěščřžýá"),
       ints = Set(Random.nextInt(1000), Random.nextInt(1000), Random.nextInt(1000)),
@@ -178,7 +178,7 @@ class CassandraDaoTest extends CassandraTestBase {
 
     dao.save(randomRow, options).futureValue
 
-//    assertResult(Some(randomRow))(dao.get((randomRow.id, randomRow.created)).futureValue)
+    assertResult(Some(randomRow))(dao.get((randomRow.id, randomRow.created)).futureValue)
   }
 
 }
