@@ -1,6 +1,7 @@
 package com.avast.dapper
 
 import java.nio.ByteBuffer
+import java.time.{Duration, Instant}
 
 import com.avast.dapper.Macros.AnnotationsMap
 import com.avast.dapper.dao.{CassandraDao, CassandraEntity, Column, CqlType, PartitionKey, Table}
@@ -65,14 +66,8 @@ class Macros(val c: whitebox.Context) {
 
     val entitySymbol = toCaseClassSymbol(entityType)
 
-    val tableName = getAnnotations(entitySymbol)
-      .collectFirst {
-        case (n, params) if n == classOf[Table].getName => params.get("name")
-      }
-      .flatten
-      .getOrElse {
-        c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} must have at least one PartitionKey annotated field")
-      }
+    val tableProperties = extractTableProperties(entityType, entitySymbol)
+    import tableProperties._
 
     val entityFields: Map[c.universe.Symbol, (CodecType, AnnotationsMap)] = extractFields(entityType)
 
@@ -109,18 +104,23 @@ class Macros(val c: whitebox.Context) {
 
         ..${codecs.values}
 
-        def primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
+        val tableName: String = $tableName
+
+        val defaultReadConsistencyLevel: Option[Datastax.ConsistencyLevel] = $defaultReadConsistencyLevel
+
+        val defaultWriteConsistencyLevel: Option[Datastax.ConsistencyLevel] = $defaultWriteConsistencyLevel
+
+        val primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
 
         def getPrimaryKey(instance: $entityType): $primaryKeyType = (..${primaryKeyFields.map(s => q"instance.${TermName(s.name.toString)}")})
 
         def convertPrimaryKey(k: $primaryKeyType): Seq[Object] = ${convertPrimaryKey(primaryKeyFields)}
 
-        def extract(r: ResultSet): $entityType = {
-          val row = r.one()
-          ${createExtractMethod(entitySymbol, entityFields)}
-        }
+        def extract(row: Datastax.Row): $entityType = ${createExtractMethod(entitySymbol, entityFields)}
 
-        def save(tableName: String, e: $entityType): Statement = ${createSaveMethod(tableName, entityFields)}
+        def save(tableName: String, e: $entityType, writeOptions: WriteOptions): Statement = ${createSaveMethod(tableName,
+                                                                                                                entityFields,
+                                                                                                                q"writeOptions")}
       }
       """
 
@@ -131,13 +131,42 @@ class Macros(val c: whitebox.Context) {
 
             $mapper
 
-            new CassandraDao[$primaryKeyType, $entityType]($tableName, cassandraInstance.session)
+            new CassandraDao[$primaryKeyType, $entityType](cassandraInstance.session)
          }
        """
 
     println(dao)
 
-    c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
+        c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
+//    c.abort(c.enclosingPosition, dao.toString())
+  }
+
+  private def extractTableProperties(entityType: Type, entitySymbol: ClassSymbol) = new {
+    private val annots = getAnnotations(entitySymbol)
+
+    private val tableAnnot: Map[String, String] = annots
+      .collectFirst { case (n, params) if n == classOf[Table].getName => params }
+      .getOrElse {
+        c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} must be annotated with @Table")
+      }
+
+    // format: OFF
+    val tableName: String = tableAnnot.get("name").map {
+      // prepend keyspace?
+      tableAnnot.get("keyspace").map(_ + ".").getOrElse("") + _
+    }.getOrElse {
+      c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} @Table annotation is missing 'name' param")
+    }
+
+    val defaultReadConsistencyLevel: Tree = {
+      tableAnnot.get("readConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
+    }
+
+    val defaultWriteConsistencyLevel: Tree = {
+      tableAnnot.get("writeConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
+    }
+    // format: ON
+
   }
 
   private def convertPrimaryKey(primaryKeyFields: Seq[Symbol]): Tree = {
@@ -151,7 +180,7 @@ class Macros(val c: whitebox.Context) {
     q""" { import k._; Seq(..$mappings) } """
   }
 
-  private def createSaveMethod(tableName: String, entityFields: Map[Symbol, (CodecType, AnnotationsMap)]): Tree = {
+  private def createSaveMethod(tableName: String, entityFields: Map[Symbol, (CodecType, AnnotationsMap)], writeOptions: Tree): Tree = {
     def fieldToPlaceholder(field: Symbol, codecType: CodecType): String = codecType match {
       case CodecType.UDT(codecs) => codecs.map { case (udtField, _) => s"${udtField.name}: ?" }.mkString("{", ", ", "}")
       case _ => "?"
@@ -167,6 +196,25 @@ class Macros(val c: whitebox.Context) {
       case _ => Seq(q"${TermName("codec_" + field.name)}.toObject(e.${TermName(field.name.toString)})")
     }
 
+    def decorateWithOptions(query: String): Tree = {
+      q"""
+         {
+            val usings = {
+              val opts = Seq(
+                $writeOptions.ttl.map(_.getSeconds).map(" TTL " + _),
+                $writeOptions.timestamp.map(_.toEpochMilli * 1000).map(" TIMESTAMP " + _)
+              ).flatten
+
+              if (opts.nonEmpty) opts.mkString(" USING ", " AND ", "") else ""
+            }
+
+            val ifNotExist = if ($writeOptions.ifNotExist) " IF NOT EXIST" else ""
+
+            $query + ifNotExist + usings
+         }
+       """
+    }
+
     val m = entityFields.toSeq.map {
       case (field, (codecType, _)) =>
         val placeHolder = fieldToPlaceholder(field, codecType)
@@ -179,13 +227,21 @@ class Macros(val c: whitebox.Context) {
     val bindings = m.flatMap(_._2)
 
     // TODO support customized name
-    val query = s"insert into $tableName (${entityFields.map(_._1.name).mkString(", ")}) values (${placeHolders.mkString(", ")})"
+    val query = decorateWithOptions {
+      s"insert into $tableName (${entityFields.map(_._1.name).mkString(", ")}) values (${placeHolders.mkString(", ")})"
+    }
 
     q"""
-       new SimpleStatement(
-          $query,
-          ..$bindings
-       )
+       {
+          val st = new SimpleStatement(
+            $query,
+            ..$bindings
+          )
+
+          $writeOptions.consistencyLevel.orElse(defaultWriteConsistencyLevel).foreach(st.setConsistencyLevel)
+
+          st
+       }
      """
   }
 

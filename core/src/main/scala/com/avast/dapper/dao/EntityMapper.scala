@@ -1,6 +1,6 @@
 package com.avast.dapper.dao
 
-import com.datastax.driver.core.{ResultSet, Statement}
+import com.datastax.driver.core.{ConsistencyLevel, ResultSet, Row, Statement}
 
 import scala.annotation.implicitNotFound
 
@@ -8,13 +8,19 @@ import scala.annotation.implicitNotFound
   "Could not find an instance of EntityMapper for entity ${Entity} and primary key ${PrimaryKey}, try to import or define one")
 trait EntityMapper[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]] {
 
+  def tableName: String
+
   def primaryKeyPattern: String
 
   def getPrimaryKey(instance: Entity): PrimaryKey
 
   def convertPrimaryKey(k: PrimaryKey): Seq[Object]
 
-  def extract(r: ResultSet): Entity
+  def extract(r: Row): Entity
 
-  def save(tableName: String, e: Entity): Statement
+  def save(tableName: String, e: Entity, writeOptions: WriteOptions): Statement
+
+  def defaultReadConsistencyLevel: Option[ConsistencyLevel]
+
+  def defaultWriteConsistencyLevel: Option[ConsistencyLevel]
 }

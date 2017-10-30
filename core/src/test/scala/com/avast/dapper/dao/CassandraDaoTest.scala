@@ -5,6 +5,7 @@ import java.util.UUID
 import com.avast.dapper.CassandraTestBase
 import com.datastax.driver.core._
 import com.datastax.driver.core.utils.UUIDs
+import java.time.{Instant, Duration => JavaDuration}
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.util.Random
@@ -139,7 +140,7 @@ class CassandraDaoTest extends CassandraTestBase {
   test("auto mapper") {
     case class Location(latitude: Float, longitude: Float, accuracy: Int)
 
-    @Table(name = "test")
+    @Table(name = "test", readConsistency = ConsistencyLevel.QUORUM)
     case class DbRow(
         @PartitionKey(order = 0) id: Int,
         @PartitionKey(order = 1) @Column(cqlType = classOf[CqlType.TimeUUID]) created: UUID,
@@ -169,9 +170,15 @@ class CassandraDaoTest extends CassandraTestBase {
       tuple = (Random.nextInt(1000), randomString(10) + "ěščřžýáí")
     )
 
-    dao.save(randomRow).futureValue
+    val options = WriteOptions(
+      ttl = Some(JavaDuration.ofSeconds(20)),
+      timestamp = Some(Instant.now()),
+      consistencyLevel = Some(ConsistencyLevel.EACH_QUORUM)
+    )
 
-    assertResult(Some(randomRow))(dao.get((randomRow.id, randomRow.created)).futureValue)
+    dao.save(randomRow, options).futureValue
+
+//    assertResult(Some(randomRow))(dao.get((randomRow.id, randomRow.created)).futureValue)
   }
 
 }
