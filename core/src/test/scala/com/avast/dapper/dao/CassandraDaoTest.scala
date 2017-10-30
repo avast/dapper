@@ -15,7 +15,7 @@ class CassandraDaoTest extends CassandraTestBase {
 
   override protected def dbCommands: Seq[String] = Seq.empty
 
-  def createTupleType(types: DataType*): TupleType = cassandra.underlying.getCluster.getMetadata.newTupleType(types: _*)
+//  def createTupleType(types: DataType*): TupleType = cassandra.underlying.getCluster.getMetadata.newTupleType(types: _*)
 
   //  test("manual mapper") {
   //
@@ -155,7 +155,7 @@ class CassandraDaoTest extends CassandraTestBase {
 
     import com.avast.dapper._
 
-    val dao = cassandra.underlying.createDaoFor[(Int, UUID), DbRow]
+    val dao = cassandraSession.createDaoFor[(Int, UUID), DbRow]
 
     val randomRow = DbRow(
       id = Random.nextInt(1000),
