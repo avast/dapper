@@ -23,4 +23,6 @@ trait EntityMapper[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]] {
   def defaultReadConsistencyLevel: Option[ConsistencyLevel]
 
   def defaultWriteConsistencyLevel: Option[ConsistencyLevel]
+
+  def defaultWriteTTL: Option[Int]
 }

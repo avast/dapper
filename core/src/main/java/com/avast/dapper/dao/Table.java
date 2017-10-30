@@ -1,7 +1,6 @@
 package com.avast.dapper.dao;
 
 import com.datastax.driver.core.ConsistencyLevel;
-import com.datastax.driver.mapping.Mapper;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -16,12 +15,14 @@ public @interface Table {
     String name();
 
     /**
-     * The consistency level to use for the write operations provded by the {@link Mapper} class.
+     * The consistency level to use for the write operations.
      */
-    ConsistencyLevel writeConsistency() default ConsistencyLevel.ONE;
+    ConsistencyLevel defaultWriteConsistency() default ConsistencyLevel.ONE;
 
     /**
-     * The consistency level to use for the read operations provded by the {@link Mapper} class.
+     * The consistency level to use for the read operations.
      */
-    ConsistencyLevel readConsistency() default ConsistencyLevel.ONE;
+    ConsistencyLevel defaultReadConsistency() default ConsistencyLevel.ONE;
+
+    int defaultWriteTTL() default 0;
 }

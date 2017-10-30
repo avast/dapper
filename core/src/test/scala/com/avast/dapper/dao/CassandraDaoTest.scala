@@ -140,7 +140,7 @@ class CassandraDaoTest extends CassandraTestBase {
   test("auto mapper") {
     case class Location(latitude: Float, longitude: Float, accuracy: Int)
 
-    @Table(name = "test", readConsistency = ConsistencyLevel.QUORUM)
+    @Table(name = "test", defaultReadConsistency = ConsistencyLevel.QUORUM, defaultWriteTTL = 60)
     case class DbRow(
         @PartitionKey(order = 0) id: Int,
         @PartitionKey(order = 1) @Column(cqlType = classOf[CqlType.TimeUUID]) created: UUID,

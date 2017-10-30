@@ -110,6 +110,8 @@ class Macros(val c: whitebox.Context) {
 
         val defaultWriteConsistencyLevel: Option[Datastax.ConsistencyLevel] = $defaultWriteConsistencyLevel
 
+        val defaultWriteTTL: Option[Int] = $defaultWriteTTL
+
         val primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
 
         def getPrimaryKey(instance: $entityType): $primaryKeyType = (..${primaryKeyFields.map(s => q"instance.${TermName(s.name.toString)}")})
@@ -159,11 +161,15 @@ class Macros(val c: whitebox.Context) {
     }
 
     val defaultReadConsistencyLevel: Tree = {
-      tableAnnot.get("readConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
+      tableAnnot.get("defaultReadConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
     }
 
     val defaultWriteConsistencyLevel: Tree = {
-      tableAnnot.get("writeConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
+      tableAnnot.get("defaultWriteConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
+    }
+
+    val defaultWriteTTL: Tree = {
+      tableAnnot.get("defaultWriteTTL").map(c => q"Some($c.toInt)").getOrElse(q"None")
     }
     // format: ON
 
@@ -201,8 +207,8 @@ class Macros(val c: whitebox.Context) {
          {
             val usings = {
               val opts = Seq(
-                $writeOptions.ttl.map(_.getSeconds).map(" TTL " + _),
-                $writeOptions.timestamp.map(_.toEpochMilli * 1000).map(" TIMESTAMP " + _)
+                $writeOptions.ttl.map(_.getSeconds).map("TTL " + _).orElse(defaultWriteTTL),
+                $writeOptions.timestamp.map(_.toEpochMilli * 1000).map("TIMESTAMP " + _)
               ).flatten
 
               if (opts.nonEmpty) opts.mkString(" USING ", " AND ", "") else ""
