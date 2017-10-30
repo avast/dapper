@@ -1,13 +1,16 @@
 package com.avast.dapper.dao
 
+import java.util.concurrent.Executor
+
 import com.datastax.driver.core._
 import com.typesafe.scalalogging.LazyLogging
 
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, Future}
 
 class CassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](session: Session)(
     implicit entityMapper: EntityMapper[PrimaryKey, Entity],
-    ec: ExecutionContextExecutor)
+    ec: ExecutionContext,
+    ex: Executor)
     extends Dao[PrimaryKey, Entity]
     with LazyLogging {
 
