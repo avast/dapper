@@ -441,8 +441,6 @@ class Macros(val c: whitebox.Context) {
   }
 
   private def createTupleType(cqlTypes: Type*): Tree = {
-    //cassandra.underlying.getCluster.getMetadata.newTupleType(types: _*)
-
     def toDataType(cqlType: Type): Tree = {
       val typeArgs = cqlType.typeArgs
 
@@ -480,7 +478,14 @@ class Macros(val c: whitebox.Context) {
   }
 
   private def getVariable: Tree = {
-    q" ${c.prefix.tree} "
+    val variable = c.prefix.tree match {
+      case q"dapper.this.`package`.${_}($n)" => n
+      case q"com.avast.dapper.`package`.${_}($n)" => n
+
+      case t => c.abort(c.enclosingPosition, s"Cannot process the conversion - variable name extraction from tree '$t' failed")
+    }
+
+    q" $variable "
   }
 
   private def extractFields(entityType: Type): Map[Symbol, (CodecType, AnnotationsMap)] = {

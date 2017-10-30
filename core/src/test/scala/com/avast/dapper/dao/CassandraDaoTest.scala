@@ -155,7 +155,7 @@ class CassandraDaoTest extends CassandraTestBase {
 
     import com.avast.dapper._
 
-    val dao = new Cassandra(cassandra.underlying).createDaoFor[(Int, UUID), DbRow]
+    val dao = cassandra.underlying.createDaoFor[(Int, UUID), DbRow]
 
     val randomRow = DbRow(
       id = Random.nextInt(1000),
