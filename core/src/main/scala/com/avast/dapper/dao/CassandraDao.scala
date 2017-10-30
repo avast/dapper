@@ -16,13 +16,16 @@ class CassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](session: S
   override def tableName: String = entityMapper.tableName
 
   override def get(primaryKey: PrimaryKey, queryOptions: ReadOptions = ReadOptions.Default): Future[Option[Entity]] = {
-    // TODO options
     logger.debug(s"Querying $tableName with primary key $primaryKey and $queryOptions")
 
     val convertedKey = entityMapper.convertPrimaryKey(primaryKey)
-    val q = new SimpleStatement(s"select * from $tableName where ${entityMapper.primaryKeyPattern}", convertedKey: _*)
+    val st = new SimpleStatement(s"select * from $tableName where ${entityMapper.primaryKeyPattern}", convertedKey: _*)
 
-    execute(q)
+    queryOptions.consistencyLevel
+      .orElse(entityMapper.defaultWriteConsistencyLevel)
+      .foreach(st.setConsistencyLevel)
+
+    execute(st)
       .map { r =>
         if (r.isExhausted) None else Option(entityMapper.extract(r.one()))
       }
@@ -34,15 +37,29 @@ class CassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](session: S
   }
 
   override def delete(instance: Entity, queryOptions: DeleteOptions = DeleteOptions.Default): Future[Unit] = {
-    // TODO options
+    def decorateWithOptions(query: String): String = {
+      val timestamp = queryOptions.timestamp.map(_.toEpochMilli * 1000).map(" USING TIMESTAMP " + _)
+      val ifExists = if (queryOptions.ifExists) " IF EXISTS" else ""
+
+      query + timestamp + ifExists
+    }
+
     val primaryKey = entityMapper.getPrimaryKey(instance)
 
     logger.debug(s"Deleting from $tableName with primary key $primaryKey and $queryOptions")
 
     val convertedKey = entityMapper.convertPrimaryKey(primaryKey)
-    val q = new SimpleStatement(s"delete from $tableName where ${entityMapper.primaryKeyPattern}", convertedKey)
+    val query = decorateWithOptions {
+      s"delete from $tableName where ${entityMapper.primaryKeyPattern}"
+    }
 
-    execute(q).map(toUnit)
+    val st = new SimpleStatement(query, convertedKey)
+
+    queryOptions.consistencyLevel
+      .orElse(entityMapper.defaultWriteConsistencyLevel)
+      .foreach(st.setConsistencyLevel)
+
+    execute(st).map(toUnit)
   }
 
   private def execute(st: Statement): Future[ResultSet] = {
