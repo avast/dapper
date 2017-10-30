@@ -150,13 +150,12 @@ class CassandraDaoTest extends CassandraTestBase {
         @Column(name = "value", cqlType = classOf[CqlType.VarChar]) stringValue: String,
         @Column(cqlType = classOf[CqlType.UDT]) location: Location,
         valueOpt: Option[String],
-        //                     @Column(cqlType = classOf[CqlType.Map[CqlType.Int, CqlType.VarChar]])
         tuple: (Int, String)
     ) extends CassandraEntity[(Int, UUID)]
 
     import com.avast.dapper._
 
-    val dao = new Cassandra(cassandra.underlying).deriveDaoFor[(Int, UUID), DbRow]
+    val dao = new Cassandra(cassandra.underlying).createDaoFor[(Int, UUID), DbRow]
 
     val randomRow = DbRow(
       id = Random.nextInt(1000),
