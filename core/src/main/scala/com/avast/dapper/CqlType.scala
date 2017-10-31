@@ -6,36 +6,36 @@ object CqlType {
 
   // all following types are case class with no param intentionally - it't used like a better enum both into Scala and Java, case object cannot be used
 
-  case class VarChar() extends CqlType
+  trait VarChar  extends CqlType
 
-  case class Ascii() extends CqlType
+  trait Ascii  extends CqlType
 
-  case class Int() extends CqlType
+  trait Int  extends CqlType
 
-  case class UUID() extends CqlType
+  trait UUID  extends CqlType
 
-  case class TimeUUID() extends CqlType
+  trait TimeUUID  extends CqlType
 
-  case class Boolean() extends CqlType
+  trait Boolean  extends CqlType
 
-  case class Blob() extends CqlType
+  trait Blob  extends CqlType
 
-  case class Double() extends CqlType
+  trait Double  extends CqlType
 
-  case class Float() extends CqlType
+  trait Float  extends CqlType
 
-  case class Date() extends CqlType
+  trait Date  extends CqlType
 
-  case class Timestamp() extends CqlType
+  trait Timestamp  extends CqlType
 
-  case class List[A <: CqlType]() extends CqlType
+  trait List[A <: CqlType]  extends CqlType
 
-  case class Set[A <: CqlType]() extends CqlType
+  trait Set[A <: CqlType]  extends CqlType
 
-  case class Map[K <: CqlType, V <: CqlType]() extends CqlType
+  trait Map[K <: CqlType, V <: CqlType]  extends CqlType
 
-  case class Tuple2[A1 <: CqlType, A2 <: CqlType]() extends CqlType
+  trait Tuple2[A1 <: CqlType, A2 <: CqlType]  extends CqlType
 
-  case class UDT() extends CqlType
+  trait UDT  extends CqlType
 
 }

@@ -3,9 +3,10 @@ package com.avast.dapper
 import java.nio.ByteBuffer
 
 import com.avast.dapper.Macros.AnnotationsMap
-import com.avast.dapper.dao.{Column, PartitionKey, Table}
+import com.avast.dapper.dao.{Column, PartitionKey, Table, UDT}
 import com.datastax.driver.{core => Datastax}
 
+import scala.language.reflectiveCalls
 import scala.reflect.macros._
 
 class Macros(val c: whitebox.Context) {
@@ -68,7 +69,7 @@ class Macros(val c: whitebox.Context) {
     val tableProperties = extractTableProperties(entityType, entitySymbol)
     import tableProperties._
 
-    val entityFields: Map[c.universe.Symbol, (CodecType, AnnotationsMap)] = extractFields(entityType)
+    val entityFields: Map[Symbol, (CodecType, AnnotationsMap)] = extractFields(entityType)
 
     val primaryKeyFields = entityFields
       .collect {
@@ -138,7 +139,7 @@ class Macros(val c: whitebox.Context) {
          }
        """
 
-    println(dao)
+    //    println(dao)
 
     c.Expr[DefaultCassandraDao[PrimaryKey, Entity]](dao)
   }
@@ -172,6 +173,16 @@ class Macros(val c: whitebox.Context) {
       tableAnnot.get("defaultWriteTTL").map(c => q"Some($c.toInt)").getOrElse(q"None")
     }
     // format: ON
+
+  }
+
+  private def extractUDTProperties(entityType: Type, entitySymbol: ClassSymbol) = new {
+    private val annots = getAnnotations(entitySymbol)
+
+    private val udtAnnot: Option[Map[String, String]] = annots
+      .collectFirst { case (n, params) if n == classOf[UDT].getName => params }
+
+    val udtName: Option[String] = udtAnnot.flatMap(_.get("name"))
 
   }
 
@@ -257,6 +268,9 @@ class Macros(val c: whitebox.Context) {
           q"""
              {
                val userType = cassandraInstance.getCluster.getMetadata.getKeyspace(cassandraInstance.getLoggedKeyspace).getUserType($udtName)
+
+               if (userType == null) throw new IllegalArgumentException("Cannot locate type '" + $udtName + "' in DB!")
+
                val udtCodec: TypeCodec[UDTValue] =  CodecRegistry.DEFAULT_INSTANCE.codecFor(userType)
 
                new ScalaCodec[$udtType, UDTValue, CqlType.UDT](udtCodec) {
@@ -321,7 +335,7 @@ class Macros(val c: whitebox.Context) {
 
   }
 
-  private def getAnnotations(symbol: c.universe.Symbol): AnnotationsMap = {
+  private def getAnnotations(symbol: Symbol): AnnotationsMap = {
     val annotsTypes = symbol.annotations.map(_.tree.tpe.typeSymbol.fullName)
     val annotsParams = symbol.annotations.map {
       _.tree.children.tail.map {
@@ -339,14 +353,14 @@ class Macros(val c: whitebox.Context) {
 
     val udtFields = extractFields(udtType)
 
-    val codecs = udtFields.map {
+    val fieldsAndCodecs = udtFields.map {
       case (udtField, (codecType, annots)) => (udtField, fieldFinalName(udtField, annots)) -> codecType
     }
 
-    // TODO support customized name
-    //    val udtProps = extractTableProperties(udtType, udtSymbol)
+    val udtProps = extractUDTProperties(udtType, udtSymbol)
+    val udtName = udtProps.udtName.getOrElse(udtSymbol.name.toString)
 
-    CodecType.UDT(name = field.name.toString, udtFields = codecs)
+    CodecType.UDT(name = udtName, udtFields = fieldsAndCodecs)
   }
 
   private def defaultCqlType(ts: Type): Type = {
