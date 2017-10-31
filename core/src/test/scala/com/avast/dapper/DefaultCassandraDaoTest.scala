@@ -21,7 +21,7 @@ class DefaultCassandraDaoTest extends CassandraTestBase {
     @UDT(name = "location_type")
     case class Location(latitude: Float, longitude: Float, @Column(name = "accuracy", cqlType = classOf[CqlType.Int]) acc: Int)
 
-    @Table(name = "test", defaultReadConsistency = ConsistencyLevel.QUORUM, defaultWriteTTL = 60)
+    @Table(keyspace = "dapper", name = "test", defaultReadConsistency = ConsistencyLevel.QUORUM, defaultWriteTTL = 60)
     case class DbRow(
         @PartitionKey(order = 0) id: Int,
         @PartitionKey(order = 1) @Column(cqlType = classOf[CqlType.TimeUUID]) created: UUID,

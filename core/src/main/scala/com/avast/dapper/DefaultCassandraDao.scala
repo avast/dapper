@@ -9,10 +9,10 @@ import com.typesafe.scalalogging.LazyLogging
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
 
-class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](session: Session, override val tableName: String)(
-    implicit entityMapper: EntityMapper[PrimaryKey, Entity],
-    ec: ExecutionContext,
-    ex: Executor)
+class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](
+    session: Session,
+    override val keySpace: String,
+    override val tableName: String)(implicit entityMapper: EntityMapper[PrimaryKey, Entity], ec: ExecutionContext, ex: Executor)
     extends CassandraDao[PrimaryKey, Entity]
     with LazyLogging {
 
@@ -21,7 +21,7 @@ class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](ses
   override def get(primaryKey: PrimaryKey, queryOptions: ReadOptions = ReadOptions.Default): Future[Option[Entity]] = {
     logger.debug(s"Querying $tableName with primary key $primaryKey and $queryOptions")
 
-    val st = QueryBuilder.select().from(tableName)
+    val st = QueryBuilder.select().from(keySpace, tableName)
 
     entityMapper
       .getWhereParams(primaryKey)
@@ -41,7 +41,7 @@ class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](ses
   override def save(instance: Entity, queryOptions: WriteOptions = WriteOptions.Default): Future[Unit] = {
     logger.debug(s"Saving to $tableName with primary key ${entityMapper.getPrimaryKey(instance)} and $queryOptions")
 
-    val st = QueryBuilder.insertInto(tableName)
+    val st = QueryBuilder.insertInto(keySpace, tableName)
 
     val (names, values) = entityMapper.getFields(instance).unzip
     st.values(names.toArray, values.toArray)
@@ -63,7 +63,7 @@ class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](ses
 
     logger.debug(s"Deleting from $tableName with primary key $primaryKey and $queryOptions")
 
-    val st = QueryBuilder.delete().from(tableName)
+    val st = QueryBuilder.delete().from(keySpace, tableName)
 
     entityMapper
       .getWhereParams(primaryKey)

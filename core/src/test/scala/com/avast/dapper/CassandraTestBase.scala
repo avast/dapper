@@ -11,8 +11,9 @@ trait CassandraTestBase extends TestBase {
     // init the DB
     val session = ClusterBuilder.fromConfig(config.getConfig("cassandra")).withoutMetrics().build().connect()
     prepareDatabase(session)
+    session.close()
 
-    session
+    ClusterBuilder.fromConfig(config.getConfig("cassandra")).withoutMetrics().build().connect()
   }
 
   protected def dbCommands: Seq[String]

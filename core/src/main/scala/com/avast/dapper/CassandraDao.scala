@@ -7,6 +7,8 @@ import com.datastax.driver.core.ConsistencyLevel
 import scala.concurrent.Future
 
 trait CassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]] {
+  def keySpace: String
+
   def tableName: String
 
   def get(primaryKey: PrimaryKey, queryOptions: ReadOptions = ReadOptions.Default): Future[Option[Entity]]
@@ -18,7 +20,10 @@ trait CassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]] {
 
 case class ReadOptions(consistencyLevel: Option[ConsistencyLevel] = None)
 
-case class WriteOptions(ttl: Option[Duration] = None, timestamp: Option[Instant] = None, consistencyLevel: Option[ConsistencyLevel] = None, ifNotExist: Boolean = false)
+case class WriteOptions(ttl: Option[Duration] = None,
+                        timestamp: Option[Instant] = None,
+                        consistencyLevel: Option[ConsistencyLevel] = None,
+                        ifNotExist: Boolean = false)
 
 case class DeleteOptions(timestamp: Option[Instant] = None, consistencyLevel: Option[ConsistencyLevel] = None, ifExists: Boolean = false)
 

@@ -97,7 +97,7 @@ class Macros(val c: whitebox.Context) {
     val mapper =
       q"""
 
-      private implicit val mapper: EntityMapper[$primaryKeyType, $entityType] = new EntityMapper[$primaryKeyType, $entityType] {
+        private implicit val mapper: EntityMapper[$primaryKeyType, $entityType] = new EntityMapper[$primaryKeyType, $entityType] {
 
         import com.datastax.driver.{core => Datastax}
         import Datastax.querybuilder._
@@ -128,16 +128,25 @@ class Macros(val c: whitebox.Context) {
       }
       """
 
+    // @formatter:off
+    // format: OFF
     val dao =
       q"""
          {
             val cassandraInstance = $getVariable
 
+            val keyspaceName: String = ${
+              keySpace.map(n => q"$n")
+              .getOrElse(q"""Option(cassandraInstance.getLoggedKeyspace).getOrElse(throw new IllegalArgumentException("Could not extract keyspace scheme; either connect Session to a keyspace or specify the keyspace in the @Table annotation"))""")
+            }
+
             $mapper
 
-            new DefaultCassandraDao[$primaryKeyType, $entityType](cassandraInstance.session, $tableName)
+            new DefaultCassandraDao[$primaryKeyType, $entityType](cassandraInstance.session, keyspaceName, $tableName)
          }
        """
+    // format: ON
+    // @formatter:on
 
     //    println(dao)
 
@@ -153,13 +162,10 @@ class Macros(val c: whitebox.Context) {
         c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} must be annotated with @Table")
       }
 
+    val keySpace: Option[String] = tableAnnot.get("keyspace")
+
     // format: OFF
-    val tableName: String = tableAnnot.get("name").map {
-      // prepend keyspace?
-      tableAnnot.get("keyspace").map(_ + ".").getOrElse("") + _
-    }.getOrElse {
-      c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} @Table annotation is missing 'name' param")
-    }
+    val tableName: String = tableAnnot.getOrElse("name", c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} @Table annotation is missing 'name' param"))
 
     val defaultReadConsistencyLevel: Tree = {
       tableAnnot.get("defaultReadConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
@@ -267,7 +273,7 @@ class Macros(val c: whitebox.Context) {
           // @formatter:off
           q"""
              {
-               val userType = cassandraInstance.getCluster.getMetadata.getKeyspace(cassandraInstance.getLoggedKeyspace).getUserType($udtName)
+               val userType = cassandraInstance.getCluster.getMetadata.getKeyspace(keyspaceName).getUserType($udtName)
 
                if (userType == null) throw new IllegalArgumentException("Cannot locate type '" + $udtName + "' in DB!")
 
