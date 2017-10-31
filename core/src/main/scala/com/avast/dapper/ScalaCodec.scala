@@ -1,4 +1,4 @@
-package com.avast.dapper.dao
+package com.avast.dapper
 
 import java.nio.ByteBuffer
 import java.time.Instant

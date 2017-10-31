@@ -1,6 +1,6 @@
-package com.avast.dapper.dao
+package com.avast.dapper
 
-import com.datastax.driver.core.{ConsistencyLevel, ResultSet, Row, Statement}
+import com.datastax.driver.core.{ConsistencyLevel, Row, Statement}
 
 import scala.annotation.implicitNotFound
 

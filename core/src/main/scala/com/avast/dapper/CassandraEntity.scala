@@ -1,3 +1,3 @@
-package com.avast.dapper.dao
+package com.avast.dapper
 
 trait CassandraEntity[PrimaryKey]

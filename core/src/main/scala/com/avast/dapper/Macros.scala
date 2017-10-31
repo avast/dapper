@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 import java.time.{Duration, Instant}
 
 import com.avast.dapper.Macros.AnnotationsMap
-import com.avast.dapper.dao.{CassandraDao, CassandraEntity, Column, CqlType, PartitionKey, Table}
+import com.avast.dapper.dao.{Column, PartitionKey, Table}
 import com.datastax.driver.{core => Datastax}
 
 import scala.reflect.macros._
@@ -58,7 +58,7 @@ class Macros(val c: whitebox.Context) {
   }
 
   // format: OFF
-  def createDao[PrimaryKey: c.WeakTypeTag, Entity <: CassandraEntity[PrimaryKey] : c.WeakTypeTag]: c.Expr[CassandraDao[PrimaryKey, Entity]] = {
+  def createDao[PrimaryKey: c.WeakTypeTag, Entity <: CassandraEntity[PrimaryKey] : c.WeakTypeTag]: c.Expr[DefaultCassandraDao[PrimaryKey, Entity]] = {
     // format: ON
 
     val primaryKeyType = weakTypeOf[PrimaryKey]
@@ -133,14 +133,13 @@ class Macros(val c: whitebox.Context) {
 
             $mapper
 
-            new CassandraDao[$primaryKeyType, $entityType](cassandraInstance.session)
+            new DefaultCassandraDao[$primaryKeyType, $entityType](cassandraInstance.session)
          }
        """
 
-    println(dao)
+//    println(dao)
 
-    c.Expr[CassandraDao[PrimaryKey, Entity]](dao)
-//    c.abort(c.enclosingPosition, dao.toString())
+    c.Expr[DefaultCassandraDao[PrimaryKey, Entity]](dao)
   }
 
   private def extractTableProperties(entityType: Type, entitySymbol: ClassSymbol) = new {

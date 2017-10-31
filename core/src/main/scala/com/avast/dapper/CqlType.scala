@@ -1,6 +1,4 @@
-package com.avast.dapper.dao
-
-import com.datastax.driver.core.TypeCodec
+package com.avast.dapper
 
 sealed trait CqlType {}
 

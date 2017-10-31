@@ -1,5 +1,7 @@
 package com.avast.dapper.dao;
 
+import com.avast.dapper.CqlType;
+
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;

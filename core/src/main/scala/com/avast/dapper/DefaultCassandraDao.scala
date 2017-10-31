@@ -1,4 +1,4 @@
-package com.avast.dapper.dao
+package com.avast.dapper
 
 import java.util.concurrent.Executor
 
@@ -7,14 +7,14 @@ import com.typesafe.scalalogging.LazyLogging
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class CassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](session: Session)(
+class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](session: Session)(
     implicit entityMapper: EntityMapper[PrimaryKey, Entity],
     ec: ExecutionContext,
     ex: Executor)
-    extends Dao[PrimaryKey, Entity]
+    extends CassandraDao[PrimaryKey, Entity]
     with LazyLogging {
 
-  import CassandraDao._
+  import DefaultCassandraDao._
 
   override def tableName: String = entityMapper.tableName
 
@@ -71,6 +71,6 @@ class CassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](session: S
   }
 }
 
-object CassandraDao {
+object DefaultCassandraDao {
   private val toUnit = (_: AnyRef) => ()
 }
