@@ -3,11 +3,13 @@ package com.avast.dapper
 import java.util.concurrent.Executor
 
 import com.datastax.driver.core._
+import com.datastax.driver.core.querybuilder.QueryBuilder
 import com.typesafe.scalalogging.LazyLogging
 
+import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
 
-class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](session: Session)(
+class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](session: Session, override val tableName: String)(
     implicit entityMapper: EntityMapper[PrimaryKey, Entity],
     ec: ExecutionContext,
     ex: Executor)
@@ -16,16 +18,18 @@ class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](ses
 
   import DefaultCassandraDao._
 
-  override def tableName: String = entityMapper.tableName
-
   override def get(primaryKey: PrimaryKey, queryOptions: ReadOptions = ReadOptions.Default): Future[Option[Entity]] = {
     logger.debug(s"Querying $tableName with primary key $primaryKey and $queryOptions")
 
-    val convertedKey = entityMapper.convertPrimaryKey(primaryKey)
-    val st = new SimpleStatement(s"select * from $tableName where ${entityMapper.primaryKeyPattern}", convertedKey: _*)
+    val st = QueryBuilder.select().from(tableName)
+
+    entityMapper
+      .getWhereParams(primaryKey)
+      .map { case (name, value) => QueryBuilder.eq(name, value) }
+      .foldLeft(st.where())(_ and _)
 
     queryOptions.consistencyLevel
-      .orElse(entityMapper.defaultWriteConsistencyLevel)
+      .orElse(entityMapper.defaultReadConsistencyLevel)
       .foreach(st.setConsistencyLevel)
 
     execute(st)
@@ -36,31 +40,43 @@ class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](ses
 
   override def save(instance: Entity, queryOptions: WriteOptions = WriteOptions.Default): Future[Unit] = {
     logger.debug(s"Saving to $tableName with primary key ${entityMapper.getPrimaryKey(instance)} and $queryOptions")
-    execute(entityMapper.save(tableName, instance, queryOptions)).map(toUnit)
-  }
 
-  override def delete(instance: Entity, queryOptions: DeleteOptions = DeleteOptions.Default): Future[Unit] = {
-    def decorateWithOptions(query: String): String = {
-      val timestamp = queryOptions.timestamp.map(_.toEpochMilli * 1000).map(" USING TIMESTAMP " + _)
-      val ifExists = if (queryOptions.ifExists) " IF EXISTS" else ""
+    val st = QueryBuilder.insertInto(tableName)
 
-      query + timestamp + ifExists
-    }
+    val (names, values) = entityMapper.getFields(instance).unzip
+    st.values(names.toArray, values.toArray)
 
-    val primaryKey = entityMapper.getPrimaryKey(instance)
-
-    logger.debug(s"Deleting from $tableName with primary key $primaryKey and $queryOptions")
-
-    val convertedKey = entityMapper.convertPrimaryKey(primaryKey)
-    val query = decorateWithOptions {
-      s"delete from $tableName where ${entityMapper.primaryKeyPattern}"
-    }
-
-    val st = new SimpleStatement(query, convertedKey)
+    if (queryOptions.ifNotExist) st.ifNotExists()
 
     queryOptions.consistencyLevel
       .orElse(entityMapper.defaultWriteConsistencyLevel)
       .foreach(st.setConsistencyLevel)
+
+    queryOptions.timestamp.map(_.toEpochMilli * 1000).foreach(st.setDefaultTimestamp)
+    queryOptions.ttl.map(_.getSeconds).foreach(s => st.using(QueryBuilder.ttl(s.toInt)))
+
+    execute(st).map(toUnit)
+  }
+
+  override def delete(instance: Entity, queryOptions: DeleteOptions = DeleteOptions.Default): Future[Unit] = {
+    val primaryKey = entityMapper.getPrimaryKey(instance)
+
+    logger.debug(s"Deleting from $tableName with primary key $primaryKey and $queryOptions")
+
+    val st = QueryBuilder.delete().from(tableName)
+
+    entityMapper
+      .getWhereParams(primaryKey)
+      .map { case (name, value) => QueryBuilder.eq(name, value) }
+      .foldLeft(st.where())(_ and _)
+
+    if (queryOptions.ifExists) st.ifExists()
+
+    queryOptions.consistencyLevel
+      .orElse(entityMapper.defaultWriteConsistencyLevel)
+      .foreach(st.setConsistencyLevel)
+
+    queryOptions.timestamp.map(_.toEpochMilli * 1000).foreach(st.setDefaultTimestamp)
 
     execute(st).map(toUnit)
   }

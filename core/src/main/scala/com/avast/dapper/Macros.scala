@@ -1,7 +1,6 @@
 package com.avast.dapper
 
 import java.nio.ByteBuffer
-import java.time.{Duration, Instant}
 
 import com.avast.dapper.Macros.AnnotationsMap
 import com.avast.dapper.dao.{Column, PartitionKey, Table}
@@ -90,9 +89,8 @@ class Macros(val c: whitebox.Context) {
       // format: ON
     }
 
-    val codecs: Map[String, Tree] = entityFields.flatMap {
-      case (field, (codecType, _)) =>
-        codec(field, codecType)
+    val codecs: Map[String, Tree] = entityFields.map {
+      case (field, (codecType, _)) => codec(field, codecType)
     }
 
     val mapper =
@@ -101,10 +99,10 @@ class Macros(val c: whitebox.Context) {
       private implicit val mapper: EntityMapper[$primaryKeyType, $entityType] = new EntityMapper[$primaryKeyType, $entityType] {
 
         import com.datastax.driver.{core => Datastax}
+        import Datastax.querybuilder._
+        import Datastax.querybuilder.Select._
 
         ..${codecs.values}
-
-        val tableName: String = $tableName
 
         val defaultReadConsistencyLevel: Option[Datastax.ConsistencyLevel] = $defaultReadConsistencyLevel
 
@@ -112,17 +110,20 @@ class Macros(val c: whitebox.Context) {
 
         val defaultWriteTTL: Option[Int] = $defaultWriteTTL
 
-        val primaryKeyPattern: String = ${primaryKeyFields.map(_.name + " = ?").mkString(" and ")}
+        def getWhereParams(k: $primaryKeyType): Map[String, Object] = {
+          import k._
+
+          Map(..${convertPrimaryKey(primaryKeyFields).map { case (f, v) => q"${f.name.toString} ->  $v" }})
+        }
 
         def getPrimaryKey(instance: $entityType): $primaryKeyType = (..${primaryKeyFields.map(s => q"instance.${TermName(s.name.toString)}")})
 
-        def convertPrimaryKey(k: $primaryKeyType): Seq[Object] = ${convertPrimaryKey(primaryKeyFields)}
+        def extract(row: Datastax.Row): $entityType = {
+          ${createExtractMethod(entitySymbol, entityFields.map { case (field, (_, annots)) => field -> fieldFinalName(field, annots) })}
+        }
 
-        def extract(row: Datastax.Row): $entityType = ${createExtractMethod(entitySymbol, entityFields)}
+        def getFields(e: $entityType): Map[String, Object] = ${createGetFieldsMethod(entityFields)}
 
-        def save(tableName: String, e: $entityType, writeOptions: WriteOptions): Statement = ${createSaveMethod(tableName,
-                                                                                                                entityFields,
-                                                                                                                q"writeOptions")}
       }
       """
 
@@ -133,11 +134,11 @@ class Macros(val c: whitebox.Context) {
 
             $mapper
 
-            new DefaultCassandraDao[$primaryKeyType, $entityType](cassandraInstance.session)
+            new DefaultCassandraDao[$primaryKeyType, $entityType](cassandraInstance.session, $tableName)
          }
        """
 
-//    println(dao)
+    println(dao)
 
     c.Expr[DefaultCassandraDao[PrimaryKey, Entity]](dao)
   }
@@ -174,81 +175,27 @@ class Macros(val c: whitebox.Context) {
 
   }
 
-  private def convertPrimaryKey(primaryKeyFields: Seq[Symbol]): Tree = {
+  private def convertPrimaryKey(primaryKeyFields: Seq[Symbol]): Map[Symbol, Tree] = {
     val withIndex = primaryKeyFields.zipWithIndex
 
-    val mappings = withIndex.map {
+    withIndex.map {
       case (field, index) =>
-        q"${TermName("codec_" + field.name)}.toObject(${TermName("_" + (index + 1))})" // for some unknown reason "k._1" cannot be used :-(
-    }
-
-    q""" { import k._; Seq(..$mappings) } """
+        field -> q"${TermName("codec_" + field.name)}.toObject(${TermName("_" + (index + 1))})" // for some unknown reason "k._1" cannot be used :-(
+    }.toMap
   }
 
-  private def createSaveMethod(tableName: String, entityFields: Map[Symbol, (CodecType, AnnotationsMap)], writeOptions: Tree): Tree = {
-    def fieldToPlaceholder(field: Symbol, codecType: CodecType): String = codecType match {
-      case CodecType.UDT(codecs) => codecs.map { case (udtField, _) => s"${udtField.name}: ?" }.mkString("{", ", ", "}")
-      case _ => "?"
+  private def createGetFieldsMethod(entityFields: Map[Symbol, (CodecType, AnnotationsMap)]): Tree = {
+    def fieldToBindings(field: Symbol, codecType: CodecType, annots: AnnotationsMap): (String, Tree) = {
+      fieldFinalName(field, annots) -> q"${TermName(s"codec_${field.name}")}.toObject(e.${TermName(field.name.toString)})"
     }
 
-    def fieldToBindings(field: Symbol, codecType: CodecType): Seq[Tree] = codecType match {
-      case CodecType.UDT(codecs) =>
-        codecs.map {
-          case (udtField, _) =>
-            q"${TermName("codec_" + field.name + "_" + udtField.name)}.toObject(e.${TermName(field.name.toString)}.${TermName(udtField.name.toString)})"
-        }.toSeq
-
-      case _ => Seq(q"${TermName("codec_" + field.name)}.toObject(e.${TermName(field.name.toString)})")
+    val fields = entityFields.map {
+      case (field, (codecType, annots)) =>
+        val (name, value) = fieldToBindings(field, codecType, annots)
+        q"$name -> $value"
     }
 
-    def decorateWithOptions(query: String): Tree = {
-      q"""
-         {
-            val usings = {
-              val opts = Seq(
-                $writeOptions.ttl.map(_.getSeconds).map("TTL " + _).orElse(defaultWriteTTL),
-                $writeOptions.timestamp.map(_.toEpochMilli * 1000).map("TIMESTAMP " + _)
-              ).flatten
-
-              if (opts.nonEmpty) opts.mkString(" USING ", " AND ", "") else ""
-            }
-
-            val ifNotExist = if ($writeOptions.ifNotExist) " IF NOT EXIST" else ""
-
-            $query + ifNotExist + usings
-         }
-       """
-    }
-
-    val m = entityFields.toSeq.map {
-      case (field, (codecType, _)) =>
-        val placeHolder = fieldToPlaceholder(field, codecType)
-        val bindings = fieldToBindings(field, codecType)
-
-        placeHolder -> bindings
-    }
-
-    val placeHolders = m.map(_._1)
-    val bindings = m.flatMap(_._2)
-
-    // format: OFF
-    val query = decorateWithOptions {
-      s"insert into $tableName (${entityFields.map { case (field, (_, annots)) => fieldFinalName(field, annots)}.mkString(", ")}) values (${placeHolders.mkString(", ")})"
-    }
-    // format: ON
-
-    q"""
-       {
-          val st = new SimpleStatement(
-            $query,
-            ..$bindings
-          )
-
-          $writeOptions.consistencyLevel.orElse(defaultWriteConsistencyLevel).foreach(st.setConsistencyLevel)
-
-          st
-       }
-     """
+    q"Map(..$fields)"
   }
 
   private def fieldFinalName(field: Symbol, annots: AnnotationsMap): String = {
@@ -259,29 +206,16 @@ class Macros(val c: whitebox.Context) {
   }
 
   private def createExtractMethod(entitySymbol: TypeSymbol,
-                                  entityFields: Map[Symbol, (CodecType, AnnotationsMap)],
+                                  entityFields: Map[Symbol, String],
                                   codecNamePrefix: String = "",
                                   rowVar: TermName = TermName("row")): Tree = {
 
     val fields: Iterable[Tree] = entityFields.map {
-      case (field, (CodecType.UDT(udtCodecs), _)) =>
-        val udtTypeSymbol = field.typeSignature.typeSymbol.asType
-        val udtFields = udtCodecs.map { case (udtField, codec) => udtField -> (codec, getAnnotations(udtField)) }
-
-        val fieldName = field.name.toString
-        val udtRowVar = TermName("row_" + fieldName)
-        q"""
-            ${TermName(fieldName)} = {
-              val $udtRowVar = $rowVar.getUDTValue($fieldName)
-              ${createExtractMethod(udtTypeSymbol, udtFields, codecNamePrefix = fieldName + "_", rowVar = udtRowVar)}
-            }
-          """
-
-      case (field, (_, annots)) =>
+      case (field, finalFieldName) =>
         val fieldName = field.name.toString
         val codecName = TermName("codec_" + codecNamePrefix + fieldName)
 
-        q"${TermName(fieldName)} = $codecName.fromObject($rowVar.get(${fieldFinalName(field, annots)}, $codecName.javaTypeCodec))"
+        q"${TermName(fieldName)} = $codecName.fromObject($rowVar.get($finalFieldName, $codecName.javaTypeCodec))"
     }
 
     q"""
@@ -291,19 +225,65 @@ class Macros(val c: whitebox.Context) {
      """
   }
 
-  private def codec(field: Symbol, codecType: CodecType, namePrefix: String = ""): Map[String, Tree] = {
-    def wrapWithVal(name: String, codec: Tree): Map[String, Tree] = {
-      Map(name -> q""" private val ${TermName("codec_" + name)} = $codec """)
+  private def codec(field: Symbol, codecType: CodecType, namePrefix: String = ""): (String, Tree) = {
+    def wrapWithVal(name: String)(codec: Tree): (String, Tree) = {
+      name -> q""" private val ${TermName("codec_" + name)} = $codec """
     }
 
     // format: OFF
     codecType match {
-      case CodecType.Simple(t, ct) => wrapWithVal(namePrefix + field.name, q"implicitly[ScalaCodec[$t, ${javaClassForCqlType(ct)}, $ct]]")
-      case CodecType.List(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.list(${scalaCodecForCqlType(inT)})")
-      case CodecType.Set(inT) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.set(${scalaCodecForCqlType(inT)})")
-      case CodecType.Map(k, v) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.map(${scalaCodecForCqlType(k)}, ${scalaCodecForCqlType(v)})")
-      case CodecType.Tuple2(a1, a2) => wrapWithVal(namePrefix + field.name.toString, q"ScalaCodec.tuple2(${createTupleType(a1, a2)})(${scalaCodecForCqlType(a1)}, ${scalaCodecForCqlType(a2)})")
-      case CodecType.UDT(codecs) => codecs.flatMap { case (udtField, udtCodec) => codec(udtField, udtCodec, namePrefix + field.name + "_") }
+      case CodecType.Simple(t, ct) => wrapWithVal(namePrefix + field.name)(q"implicitly[ScalaCodec[$t, ${javaClassForCqlType(ct)}, $ct]]")
+      case CodecType.List(inT) => wrapWithVal(namePrefix + field.name.toString)(q"ScalaCodec.list(${scalaCodecForCqlType(inT)})")
+      case CodecType.Set(inT) => wrapWithVal(namePrefix + field.name.toString)(q"ScalaCodec.set(${scalaCodecForCqlType(inT)})")
+      case CodecType.Map(k, v) => wrapWithVal(namePrefix + field.name.toString)(q"ScalaCodec.map(${scalaCodecForCqlType(k)}, ${scalaCodecForCqlType(v)})")
+      case CodecType.Tuple2(a1, a2) => wrapWithVal(namePrefix + field.name.toString)(q"ScalaCodec.tuple2(${createTupleType(a1, a2)})(${scalaCodecForCqlType(a1)}, ${scalaCodecForCqlType(a2)})")
+      case CodecType.UDT(udtName, udtFields) =>
+        wrapWithVal(namePrefix + field.name) {
+          val udtType = field.typeSignature
+          val udtCodecs = udtFields.map { case ((udtField, finalFieldName), udtCodec) =>
+            (udtField, finalFieldName) -> codec(udtField, udtCodec, namePrefix + field.name + "_")
+          }
+
+          def setField(udtField: Symbol, finalFieldName: String, codecName: String): Tree = {
+            q"""
+              builder.set(
+                $finalFieldName,
+                ${TermName(s"codec_$codecName")}.toObject(udt.${TermName(udtField.name.toString)}), ${TermName(s"codec_$codecName")}.javaTypeCodec
+              )
+             """
+          }
+
+          // @formatter:off
+          q"""
+             {
+               val userType = cassandraInstance.getCluster.getMetadata.getKeyspace(cassandraInstance.getLoggedKeyspace).getUserType($udtName)
+               val udtCodec: TypeCodec[UDTValue] =  CodecRegistry.DEFAULT_INSTANCE.codecFor(userType)
+
+               new ScalaCodec[$udtType, UDTValue, CqlType.UDT](udtCodec) {
+                  ..${udtCodecs.map { case ((_, _), (_, codecTree)) => codecTree }}
+
+                  override def toObject(udt: $udtType): UDTValue = {
+                    val builder = userType.newValue()
+
+                    ..${udtCodecs.map { case ((udtField, finalFieldName), (codecName, _)) => setField(udtField, finalFieldName, codecName) }}
+                  }
+
+                  override def fromObject(udtValue: UDTValue): $udtType = {
+                    ${
+                      createExtractMethod(
+                        field.typeSignature.typeSymbol.asType,
+                        udtCodecs.map { case ((udtField, finalFieldName), (_, _)) => udtField -> finalFieldName },
+                        codecNamePrefix = namePrefix + field.name + "_",
+                        rowVar = TermName("udtValue")
+                      )
+                    }
+                  }
+               }
+             }
+           """
+          // @formatter:on
+      }
+
     }
     // format: ON
   }
@@ -355,16 +335,18 @@ class Macros(val c: whitebox.Context) {
 
   private def createUDTCodec(field: Symbol): CodecType.UDT = {
     val udtType = field.typeSignature
-
-    toCaseClassSymbol(udtType) // don't need result, just check it's a case class
+    val udtSymbol = toCaseClassSymbol(udtType)
 
     val udtFields = extractFields(udtType)
 
     val codecs = udtFields.map {
-      case (f, (codecType, _)) => f -> codecType
+      case (udtField, (codecType, annots)) => (udtField, fieldFinalName(udtField, annots)) -> codecType
     }
 
-    CodecType.UDT(codecs = codecs)
+    // TODO support customized name
+    //    val udtProps = extractTableProperties(udtType, udtSymbol)
+
+    CodecType.UDT(name = field.name.toString, udtFields = codecs)
   }
 
   private def defaultCqlType(ts: Type): Type = {
@@ -542,7 +524,7 @@ class Macros(val c: whitebox.Context) {
 
     case class Tuple2(a1: Type, a2: Type) extends CodecType
 
-    case class UDT(codecs: scala.Predef.Map[Symbol, CodecType]) extends CodecType
+    case class UDT(name: String, udtFields: scala.Predef.Map[(Symbol, String), CodecType]) extends CodecType
 
   }
 
