@@ -5,7 +5,7 @@ import java.util.concurrent.Executor
 import com.datastax.driver.core.Session
 import com.google.common.util.concurrent.{FutureCallback, Futures, ListenableFuture}
 
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.language.experimental.macros
 
 package object dapper {
@@ -25,7 +25,8 @@ package object dapper {
   }
 
   implicit class DatastaxSession(val session: Session) extends AnyVal {
-    def createDaoFor[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]]:  CassandraDao[PrimaryKey, Entity] =
+    def createDaoFor[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](implicit ec: ExecutionContext,
+                                                                        ex: Executor): CassandraDao[PrimaryKey, Entity] =
       macro Macros.createDao[PrimaryKey, Entity]
   }
 

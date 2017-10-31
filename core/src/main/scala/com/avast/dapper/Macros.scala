@@ -58,7 +58,7 @@ class Macros(val c: whitebox.Context) {
   }
 
   // format: OFF
-  def createDao[PrimaryKey: c.WeakTypeTag, Entity <: CassandraEntity[PrimaryKey] : c.WeakTypeTag]: c.Expr[DefaultCassandraDao[PrimaryKey, Entity]] = {
+  def createDao[PrimaryKey: WeakTypeTag, Entity <: CassandraEntity[PrimaryKey] : WeakTypeTag](ec: Tree, ex: Tree): Expr[DefaultCassandraDao[PrimaryKey, Entity]] = {
     // format: ON
 
     val primaryKeyType = weakTypeOf[PrimaryKey]
