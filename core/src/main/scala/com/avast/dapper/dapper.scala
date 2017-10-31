@@ -10,6 +10,8 @@ import scala.language.experimental.macros
 
 package object dapper {
 
+  trait CassandraEntity[PrimaryKey]
+
   private[dapper] implicit class ListenableFutureToScala[T](val guavaFuture: ListenableFuture[T]) extends AnyVal {
     def asScala(implicit executor: Executor): Future[T] = {
       val p = Promise[T]()

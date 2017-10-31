@@ -10,7 +10,13 @@ import java.lang.annotation.Target;
 @Target({ElementType.FIELD, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Column {
+    /**
+     * Custom name of this column.
+     */
     String name() default "";
 
+    /**
+     * CQL type of this column.
+     */
     Class<? extends CqlType> cqlType();
 }

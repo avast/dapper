@@ -1,6 +1,6 @@
 package com.avast.dapper
 
-sealed trait CqlType {}
+sealed trait CqlType
 
 object CqlType {
 
@@ -37,6 +37,5 @@ object CqlType {
   case class Tuple2[A1 <: CqlType, A2 <: CqlType]() extends CqlType
 
   case class UDT() extends CqlType
-
 
 }
