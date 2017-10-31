@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 
 public class ClusterBuilder {
 
-    protected static final Config defaultConfig = ConfigFactory.defaultReference().getConfig("utilsDatastaxDefaults");
+    private static final Config defaultConfig = ConfigFactory.defaultReference().getConfig("clusterBuilderDefaults");
 
     public static Cluster.Builder fromConfig(Config config) {
         config = config.withFallback(defaultConfig);
@@ -47,9 +47,6 @@ public class ClusterBuilder {
                 .withSpeculativeExecutionPolicy(parseSpeculativeExecutionPolicy(config.getConfig("speculativeExecutionPolicy")))
                 .withTimestampGenerator(parseTimestampGenerator(config.getConfig("timestampGenerator")));
 
-        LatencyTracker latencyTracker = null;
-        Host.StateListener stateListener = null;
-
         List<String> seeds = config.getStringList("seeds");
         builder = builder.addContactPoints(seeds.toArray(new String[seeds.size()]));
 
@@ -66,7 +63,7 @@ public class ClusterBuilder {
     }
 
 
-    protected static ProtocolOptions.Compression parseCompression(String s) {
+    private static ProtocolOptions.Compression parseCompression(String s) {
         return Arrays.stream(ProtocolOptions.Compression.values())
                 .filter(v -> v.name().equalsIgnoreCase(s))
                 .findFirst()
@@ -74,7 +71,7 @@ public class ClusterBuilder {
     }
 
 
-    protected static LoadBalancingPolicy parseLoadBalancingPolicy(Config config) {
+    private static LoadBalancingPolicy parseLoadBalancingPolicy(Config config) {
         LoadBalancingPolicy policy = parseCoreLoadBalancingPolicy(config.getConfig("corePolicy"));
         for (String chainingPolicyName : config.getStringList("chainingPolicies")) {
             Config chainingConfig = config.getConfig("knownPolicies").getConfig(chainingPolicyName);
@@ -83,7 +80,7 @@ public class ClusterBuilder {
         return policy;
     }
 
-    protected static LoadBalancingPolicy parseCoreLoadBalancingPolicy(Config config) {
+    private static LoadBalancingPolicy parseCoreLoadBalancingPolicy(Config config) {
         String type = config.getString("type");
         if (type.equalsIgnoreCase("RoundRobin")) {
             return new RoundRobinPolicy();
@@ -103,7 +100,7 @@ public class ClusterBuilder {
         throw new ConfigException.BadValue(config.origin(), "type", "Unknown core load-balancing policy: " + type);
     }
 
-    protected static LoadBalancingPolicy parseChainingLoadBalancingPolicy(LoadBalancingPolicy childPolicy, Config config) {
+    private static LoadBalancingPolicy parseChainingLoadBalancingPolicy(LoadBalancingPolicy childPolicy, Config config) {
         String type = config.getString("type");
         if (type.equalsIgnoreCase("TokenAware")) {
             return new TokenAwarePolicy(childPolicy, config.getBoolean("shuffleReplicas"));
@@ -135,7 +132,7 @@ public class ClusterBuilder {
     }
 
 
-    protected static PoolingOptions parsePoolingOptions(Config config) {
+    private static PoolingOptions parsePoolingOptions(Config config) {
         PoolingOptions res = new PoolingOptions()
                 .setHeartbeatIntervalSeconds((int) config.getDuration("heartbeatInterval", TimeUnit.SECONDS))
                 .setIdleTimeoutSeconds((int) config.getDuration("idleTimeout", TimeUnit.SECONDS));
@@ -144,7 +141,7 @@ public class ClusterBuilder {
         return res;
     }
 
-    protected static void updatePoolingOptionsForDistance(PoolingOptions options, HostDistance distance, Config config) {
+    private static void updatePoolingOptionsForDistance(PoolingOptions options, HostDistance distance, Config config) {
         if (config.hasPath("coreConnectionsPerHost")) options.setCoreConnectionsPerHost(distance, config.getInt("coreConnectionsPerHost"));
         if (config.hasPath("maxConnectionsPerHost")) options.setMaxConnectionsPerHost(distance, config.getInt("maxConnectionsPerHost"));
         if (config.hasPath("maxRequestsPerConnection"))
@@ -152,7 +149,7 @@ public class ClusterBuilder {
         if (config.hasPath("newConnectionThreshold")) options.setNewConnectionThreshold(distance, config.getInt("newConnectionThreshold"));
     }
 
-    protected static QueryOptions parseQueryOptions(Config config) {
+    private static QueryOptions parseQueryOptions(Config config) {
         return new QueryOptions()
                 .setConsistencyLevel(parseConsistencyLevel(config.getString("consistencyLevel")))
                 .setSerialConsistencyLevel(parseConsistencyLevel(config.getString("serialConsistencyLevel")))
@@ -169,7 +166,7 @@ public class ClusterBuilder {
                 .setReprepareOnUp(config.getBoolean("reprepareOnUp"));
     }
 
-    protected static ConsistencyLevel parseConsistencyLevel(String s) {
+    private static ConsistencyLevel parseConsistencyLevel(String s) {
         return Arrays.stream(ConsistencyLevel.values())
                 .filter(v -> v.name().equalsIgnoreCase(s))
                 .findFirst()
@@ -177,7 +174,7 @@ public class ClusterBuilder {
     }
 
 
-    protected static ReconnectionPolicy parseReconnectionPolicy(Config config) {
+    private static ReconnectionPolicy parseReconnectionPolicy(Config config) {
         String type = config.getString("type");
         if (type.equalsIgnoreCase("Constant")) {
             return new ConstantReconnectionPolicy(config.getDuration("constantDelay", TimeUnit.MILLISECONDS));
@@ -189,7 +186,7 @@ public class ClusterBuilder {
     }
 
 
-    protected static RetryPolicy parseRetryPolicy(Config config) {
+    private static RetryPolicy parseRetryPolicy(Config config) {
         String type = config.getString("type");
         RetryPolicy core;
         if (type.equalsIgnoreCase("Default")) {
@@ -204,7 +201,7 @@ public class ClusterBuilder {
         return config.getBoolean("logging") ? new LoggingRetryPolicy(core) : core;
     }
 
-    protected static SocketOptions parseSocketOptions(Config config) {
+    private static SocketOptions parseSocketOptions(Config config) {
         SocketOptions res = new SocketOptions()
                 .setConnectTimeoutMillis((int) config.getDuration("connectTimeout", TimeUnit.MILLISECONDS))
                 .setReadTimeoutMillis((int) config.getDuration("readTimeout", TimeUnit.MILLISECONDS));
@@ -218,7 +215,7 @@ public class ClusterBuilder {
     }
 
 
-    protected static SpeculativeExecutionPolicy parseSpeculativeExecutionPolicy(Config config) {
+    private static SpeculativeExecutionPolicy parseSpeculativeExecutionPolicy(Config config) {
         String type = config.getString("type");
         if (type.equalsIgnoreCase("No")) {
             return NoSpeculativeExecutionPolicy.INSTANCE;
@@ -248,7 +245,7 @@ public class ClusterBuilder {
     }
 
 
-    protected static TimestampGenerator parseTimestampGenerator(Config config) {
+    private static TimestampGenerator parseTimestampGenerator(Config config) {
         String type = config.getString("type");
         if (type.equalsIgnoreCase("ServerSide")) {
             return ServerSideTimestampGenerator.INSTANCE;
@@ -263,7 +260,7 @@ public class ClusterBuilder {
     }
 
 
-    protected static SSLOptions parseSSLOptions(Config config) {
+    private static SSLOptions parseSSLOptions(Config config) {
         String type = config.getString("implementation");
         if (type.equalsIgnoreCase("JDK")) {
             List<String> cipherSuites = config.getStringList("cipherSuites");
@@ -278,7 +275,7 @@ public class ClusterBuilder {
         throw new ConfigException.BadValue(config.origin(), "type", "Unknown SSL implementation: " + type);
     }
 
-    protected static SSLContext parseSSLContext(Config config) {
+    private static SSLContext parseSSLContext(Config config) {
         try {
             SSLContext ctx = SSLContext.getInstance(config.getString("protocol"));
 
@@ -310,7 +307,7 @@ public class ClusterBuilder {
         }
     }
 
-    protected static SslContext parseSslContext(Config config) {
+    private static SslContext parseSslContext(Config config) {
         try {
             SslContextBuilder builder = SslContextBuilder
                     .forClient()
@@ -334,7 +331,7 @@ public class ClusterBuilder {
         }
     }
 
-    protected static KeyStore loadKeyStoreFromFileOrClassPath(String path, char[] password) throws IOException, KeyStoreException, CertificateException, NoSuchAlgorithmException {
+    private static KeyStore loadKeyStoreFromFileOrClassPath(String path, char[] password) throws IOException, KeyStoreException, CertificateException, NoSuchAlgorithmException {
         File file = new File(path);
         if (file.isFile()) {
             return loadKeyStoreFromInputStream(new FileInputStream(path), password);
@@ -348,7 +345,7 @@ public class ClusterBuilder {
         }
     }
 
-    protected static KeyStore loadKeyStoreFromInputStream(InputStream stream, char[] password) throws KeyStoreException, CertificateException, NoSuchAlgorithmException, IOException {
+    private static KeyStore loadKeyStoreFromInputStream(InputStream stream, char[] password) throws KeyStoreException, CertificateException, NoSuchAlgorithmException, IOException {
         try {
             KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
             keyStore.load(stream, password);
