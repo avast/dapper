@@ -2,23 +2,17 @@ package com.avast.dapper
 
 import java.nio.file.{Files, Paths}
 
-import com.avast.utils2.datastax.{Cassandra => UtilsCassandra, ClusterBuilder}
 import com.datastax.driver.core.{Session, SimpleStatement}
 import org.apache.commons.lang3.StringUtils
 
-import scala.concurrent.ExecutionContext
-
 trait CassandraTestBase extends TestBase {
 
-  protected val cassandra: UtilsCassandra = {
-    val executionContext = scala.concurrent.ExecutionContext.global
-
+  protected val cassandraSession: Session = {
     // init the DB
     val session = ClusterBuilder.fromConfig(config.getConfig("cassandra")).withoutMetrics().build().connect()
     prepareDatabase(session)
-    session.close()
 
-    UtilsCassandra.fromConfig(config.getConfig("cassandra"))(executionContext)
+    session
   }
 
   protected def dbCommands: Seq[String]
