@@ -16,11 +16,11 @@ trait EntityMapper[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]] {
 
   def getFields(instance: Entity): Map[String, Object]
 
-  def defaultReadConsistencyLevel: Option[ConsistencyLevel]
+  def defaultReadConsistencyLevel: ConsistencyLevel
 
-  def defaultWriteConsistencyLevel: Option[ConsistencyLevel]
+  def defaultWriteConsistencyLevel: ConsistencyLevel
 
-  def defaultSerialConsistencyLevel: Option[ConsistencyLevel]
+  def defaultSerialConsistencyLevel: ConsistencyLevel
 
   def defaultWriteTTL: Option[Int]
 }

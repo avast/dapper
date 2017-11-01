@@ -28,9 +28,10 @@ class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](
       .map { case (name, value) => QueryBuilder.eq(name, value) }
       .foldLeft(st.where())(_ and _)
 
-    queryOptions.consistencyLevel
-      .orElse(entityMapper.defaultReadConsistencyLevel)
-      .foreach(st.setConsistencyLevel)
+    st.setConsistencyLevel {
+      queryOptions.consistencyLevel
+        .getOrElse(entityMapper.defaultReadConsistencyLevel)
+    }
 
     execute(st)
       .map { r =>
@@ -48,13 +49,15 @@ class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](
 
     if (queryOptions.ifNotExist) st.ifNotExists()
 
-    queryOptions.consistencyLevel
-      .orElse(entityMapper.defaultWriteConsistencyLevel)
-      .foreach(st.setConsistencyLevel)
+    st.setConsistencyLevel {
+      queryOptions.consistencyLevel
+        .getOrElse(entityMapper.defaultWriteConsistencyLevel)
+    }
 
-    queryOptions.serialConsistencyLevel
-      .orElse(entityMapper.defaultSerialConsistencyLevel)
-      .foreach(st.setSerialConsistencyLevel)
+    st.setSerialConsistencyLevel {
+      queryOptions.serialConsistencyLevel
+        .getOrElse(entityMapper.defaultSerialConsistencyLevel)
+    }
 
     queryOptions.timestamp.map(_.toEpochMilli * 1000).foreach(st.setDefaultTimestamp)
     queryOptions.ttl.map(_.getSeconds).foreach(s => st.using(QueryBuilder.ttl(s.toInt)))
@@ -76,9 +79,15 @@ class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](
 
     if (queryOptions.ifExists) st.ifExists()
 
-    queryOptions.consistencyLevel
-      .orElse(entityMapper.defaultWriteConsistencyLevel)
-      .foreach(st.setConsistencyLevel)
+    st.setConsistencyLevel {
+      queryOptions.consistencyLevel
+        .getOrElse(entityMapper.defaultWriteConsistencyLevel)
+    }
+
+    st.setSerialConsistencyLevel {
+      queryOptions.serialConsistencyLevel
+        .getOrElse(entityMapper.defaultSerialConsistencyLevel)
+    }
 
     queryOptions.timestamp.map(_.toEpochMilli * 1000).foreach(st.setDefaultTimestamp)
 

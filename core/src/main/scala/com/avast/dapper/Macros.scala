@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 
 import com.avast.dapper.Macros.AnnotationsMap
 import com.avast.dapper.dao.{Column, PartitionKey, Table, UDT}
+import com.datastax.driver.core.ConsistencyLevel
 import com.datastax.driver.{core => Datastax}
 
 import scala.language.reflectiveCalls
@@ -105,11 +106,11 @@ class Macros(val c: whitebox.Context) {
 
         ..${codecs.values}
 
-        val defaultReadConsistencyLevel: Option[Datastax.ConsistencyLevel] = $defaultReadConsistencyLevel
+        val defaultReadConsistencyLevel: Datastax.ConsistencyLevel = $defaultReadConsistencyLevel
 
-        val defaultWriteConsistencyLevel: Option[Datastax.ConsistencyLevel] = $defaultWriteConsistencyLevel
+        val defaultWriteConsistencyLevel: Datastax.ConsistencyLevel = $defaultWriteConsistencyLevel
 
-        val defaultSerialConsistencyLevel: Option[Datastax.ConsistencyLevel] = $defaultSerialConsistencyLevel
+        val defaultSerialConsistencyLevel: Datastax.ConsistencyLevel = $defaultSerialConsistencyLevel
 
         val defaultWriteTTL: Option[Int] = $defaultWriteTTL
 
@@ -150,9 +151,8 @@ class Macros(val c: whitebox.Context) {
     // format: ON
     // @formatter:on
 
-    //    println(dao)
-
     c.Expr[DefaultCassandraDao[PrimaryKey, Entity]](dao)
+//    c.abort(c.enclosingPosition, dao.toString())
   }
 
   private def extractTableProperties(entityType: Type, entitySymbol: ClassSymbol) = new {
@@ -170,15 +170,21 @@ class Macros(val c: whitebox.Context) {
     val tableName: String = tableAnnot.getOrElse("name", c.abort(c.enclosingPosition, s"Provided type ${entityType.typeSymbol} @Table annotation is missing 'name' param"))
 
     val defaultReadConsistencyLevel: Tree = {
-      tableAnnot.get("defaultReadConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
+      tableAnnot.get("defaultReadConsistency")
+        .map(c => q"Datastax.ConsistencyLevel.${TermName(c)}")
+        .getOrElse(c.abort(c.enclosingPosition, "Could not extract 'defaultReadConsistency' for the table"))
     }
 
     val defaultWriteConsistencyLevel: Tree = {
-      tableAnnot.get("defaultWriteConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
+      tableAnnot.get("defaultWriteConsistency")
+        .map(c => q"Datastax.ConsistencyLevel.${TermName(c)}")
+        .getOrElse(c.abort(c.enclosingPosition, "Could not extract 'defaultWriteConsistency' for the table"))
     }
 
     val defaultSerialConsistencyLevel: Tree = {
-      tableAnnot.get("defaultSerialConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
+      tableAnnot.get("defaultSerialConsistency")
+        .map(c => q"Datastax.ConsistencyLevel.${TermName(c)}")
+        .getOrElse(c.abort(c.enclosingPosition, "Could not extract 'defaultSerialConsistency' for the table"))
     }
 
     val defaultWriteTTL: Tree = {
@@ -348,12 +354,40 @@ class Macros(val c: whitebox.Context) {
   }
 
   private def getAnnotations(symbol: Symbol): AnnotationsMap = {
+    def getDefaultParams(t: Type): Map[String, String] = {
+      val clazz = c.eval[Class[_]](c.Expr(q"classOf[$t]"))
+
+      t.decls
+        .collect {
+          case m: MethodSymbol if !m.isConstructor =>
+            // using a reflection here; it's sad but there's probably no way how to extract this from AST (at least didn't find it)
+            val name = m.name.toString
+            val method = clazz.getDeclaredMethod(name)
+
+            Option(method.getDefaultValue).map(_.toString).filter(_.trim.nonEmpty).map(name -> _)
+        }
+        .flatten
+        .toMap
+    }
+
     val annotsTypes = symbol.annotations.map(_.tree.tpe.typeSymbol.fullName)
-    val annotsParams = symbol.annotations.map {
-      _.tree.children.tail.map {
+    val annotsParams = symbol.annotations.map { annotation =>
+      val defaultParams = getDefaultParams(annotation.tree.tpe)
+
+      val params = annotation.tree.children.tail.map {
         case q" $name = $value " =>
-          name.toString() -> c.eval(c.Expr(q"$value")).toString
+          val strValue = {
+            val v = c.eval(c.Expr(q"$value")).toString
+
+            // enum values come as "value YXZ", remove the prefix!
+            val parts = v.split(" ")
+            parts.tail.headOption.getOrElse(parts.head)
+          }
+
+          name.toString() -> strValue
       }.toMap
+
+      defaultParams ++ params // causes override of default params with explicit ones
     }
 
     annotsTypes.zip(annotsParams).toMap
