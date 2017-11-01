@@ -3,7 +3,6 @@ scala:
 - 2.11.11
 jdk:
 - oraclejdk8
-skip_cleanup: true
 sudo: required
 before_install:
   - sudo apt-get update
