@@ -109,6 +109,8 @@ class Macros(val c: whitebox.Context) {
 
         val defaultWriteConsistencyLevel: Option[Datastax.ConsistencyLevel] = $defaultWriteConsistencyLevel
 
+        val defaultSerialConsistencyLevel: Option[Datastax.ConsistencyLevel] = $defaultSerialConsistencyLevel
+
         val defaultWriteTTL: Option[Int] = $defaultWriteTTL
 
         def getWhereParams(k: $primaryKeyType): Map[String, Object] = {
@@ -173,6 +175,10 @@ class Macros(val c: whitebox.Context) {
 
     val defaultWriteConsistencyLevel: Tree = {
       tableAnnot.get("defaultWriteConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
+    }
+
+    val defaultSerialConsistencyLevel: Tree = {
+      tableAnnot.get("defaultSerialConsistency").flatMap(_.split(" ").tail.headOption).map(c => q"Some(Datastax.ConsistencyLevel.valueOf($c))").getOrElse(q"None")
     }
 
     val defaultWriteTTL: Tree = {

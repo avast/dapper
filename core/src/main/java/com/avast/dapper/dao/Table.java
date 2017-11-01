@@ -26,6 +26,11 @@ public @interface Table {
     ConsistencyLevel defaultWriteConsistency() default ConsistencyLevel.ONE;
 
     /**
+     * The default consistency level to use for lightweight transactions - see <a href="https://www.datastax.com/dev/blog/lightweight-transactions-in-cassandra-2-0">docs</a> .
+     */
+    ConsistencyLevel defaultSerialConsistency() default ConsistencyLevel.ONE;
+
+    /**
      * The default consistency level to use for the read operations. Can be overridden for specific call.
      */
     ConsistencyLevel defaultReadConsistency() default ConsistencyLevel.ONE;

@@ -52,6 +52,10 @@ class DefaultCassandraDao[PrimaryKey, Entity <: CassandraEntity[PrimaryKey]](
       .orElse(entityMapper.defaultWriteConsistencyLevel)
       .foreach(st.setConsistencyLevel)
 
+    queryOptions.serialConsistencyLevel
+      .orElse(entityMapper.defaultSerialConsistencyLevel)
+      .foreach(st.setSerialConsistencyLevel)
+
     queryOptions.timestamp.map(_.toEpochMilli * 1000).foreach(st.setDefaultTimestamp)
     queryOptions.ttl.map(_.getSeconds).foreach(s => st.using(QueryBuilder.ttl(s.toInt)))
 

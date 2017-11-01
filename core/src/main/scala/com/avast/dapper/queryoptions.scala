@@ -9,6 +9,7 @@ case class ReadOptions(consistencyLevel: Option[ConsistencyLevel] = None)
 case class WriteOptions(ttl: Option[Duration] = None,
                         timestamp: Option[Instant] = None,
                         consistencyLevel: Option[ConsistencyLevel] = None,
+                        serialConsistencyLevel: Option[ConsistencyLevel] = None,
                         ifNotExist: Boolean = false)
 
 case class DeleteOptions(timestamp: Option[Instant] = None, consistencyLevel: Option[ConsistencyLevel] = None, ifExists: Boolean = false)
